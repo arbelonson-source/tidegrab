@@ -80,7 +80,7 @@ button.gold:hover:not(:disabled) { background: linear-gradient(180deg, #ffd978, 
 .timer { height: 8px; background: rgba(255, 255, 255, 0.08); border-radius: 99px; overflow: hidden; margin-top: 8px; }
 .timer i { display: block; height: 100%; width: 100%; background: linear-gradient(90deg, var(--teal), var(--gold)); transition: width 0.25s linear; }
 .timer.low i { background: var(--bad); animation: pulse 1s ease-in-out infinite; }
-#tleft.low { color: var(--bad); font-weight: 700; }
+#tleft.low { color: var(--bad); font-weight: 700; animation: pulse 1s ease-in-out infinite; }
 .players { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
 .pl { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 12px; position: relative; }
 .pl.me { border-color: rgba(242, 193, 78, 0.6); }
@@ -95,6 +95,7 @@ button.gold:hover:not(:disabled) { background: linear-gradient(180deg, #ffd978, 
 .sub.ok { color: var(--teal); }
 .wrecks { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
 .wreck {
+  position: relative;
   text-align: left; background: linear-gradient(180deg, rgba(20, 70, 104, 0.9), rgba(9, 36, 58, 0.9));
   border: 2px solid var(--line); border-radius: var(--radius); padding: 14px; cursor: pointer; font-weight: 400; min-height: 120px;
 }
@@ -189,3 +190,17 @@ kbd { font: 0.8rem/1 ui-monospace, monospace; padding: 3px 6px; border-radius: 6
   *, *::before, *::after { animation: none !important; transition: none !important; }
   .bubbles { display: none; }
 }
+
+.hlline { margin: 0 0 12px; color: var(--gold); font-weight: 700; }
+.mine { display: inline-block; margin-top: 8px; padding: 2px 8px; border: 1px dashed var(--gold); border-radius: 999px; color: var(--gold); font-size: 0.8rem; font-weight: 700; }
+.wreck .mine { display: block; width: fit-content; }
+h2 .mine { margin: 0 0 0 10px; font-size: 0.75rem; vertical-align: middle; color: var(--teal); border-color: var(--teal); }
+.rw { position: relative; }
+.rw .plus { position: absolute; right: 12px; top: 4px; font-weight: 800; font-size: 1.3rem; color: var(--gold); opacity: 0; pointer-events: none; }
+.fresh .rw .plus { animation: plusup 1.6s ease-out 0.5s both; }
+.rw.empty { opacity: 0.75; }
+.rw.empty .verdict { color: var(--muted); font-weight: 400; }
+.fresh .rw.silt { animation: rise 0.6s ease both, shake 0.5s ease 0.5s 1; }
+.stand .tw, .tw .stand { margin: 0 auto; }
+@keyframes plusup { 0% { opacity: 0; transform: translateY(8px); } 20% { opacity: 1; } 100% { opacity: 0; transform: translateY(-34px); } }
+@keyframes shake { 20% { transform: translateX(-5px); } 40% { transform: translateX(5px); } 60% { transform: translateX(-3px); } 80% { transform: translateX(3px); } }

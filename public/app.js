@@ -181,23 +181,20 @@ function matchStats(rounds, players) {
   return { rows: players.map((p) => S[p.seat]), steal };
 }
 
-function statsView(rounds, players) {
-  const { rows, steal } = matchStats(rounds, players);
-  const mostTies = Math.max(...rows.map((r) => r.ties));
-  const sil = mostTies > 0 ? rows.filter((r) => r.ties === mostTies) : [];
+function highlight(rounds, players) {
   const nm = (s) => (players.find((p) => p.seat === s) || {}).name;
-  const lines = [
-    steal && steal.gain > 0 ? `Biggest steal: ${nm(steal.seat)} took ${steal.gain} pearl${steal.gain === 1 ? "" : "s"} for ${steal.air} air` : null,
-    sil.length ? `Most silt-outs: ${sil.map((r) => r.name).join(" & ")} (${mostTies})` : null
-  ].filter(Boolean);
-  return h("div", { class: "stats" },
-    h("h2", {}, "Match stats"),
-    lines.length ? h("ul", { class: "hl" }, lines.map((l) => h("li", {}, l))) : null,
-    h("div", { class: "tw" }, h("table", { class: "stand st2" },
-      h("thead", {}, h("tr", {}, ["Diver", "Won", "Pearls", "Air", "Ties", "Best dive"].map((c, i) => h("th", { scope: "col" }, c)))),
-      h("tbody", {}, rows.map((r) => h("tr", {}, h("th", { scope: "row" }, r.name), h("td", {}, r.won), h("td", {}, r.pearls), h("td", {}, r.air), h("td", {}, r.ties), h("td", {}, r.best ? `#${r.best.id} for ${r.best.gain}` : "-")))))));
+  const { steal } = matchStats(rounds, players);
+  let close = null;
+  for (const r of rounds) for (const w of r.wrecks) {
+    if (w.winner == null || w.divers.length < 2) continue;
+    const a = w.divers.map((d) => d.air).sort((x, y) => y - x), gap = a[0] - a[1];
+    if (gap >= 1 && (!close || gap < close.gap || (gap === close.gap && (w.gain ?? w.pearls) > close.gain))) close = { seat: w.winner, gap, gain: w.gain ?? w.pearls };
+  }
+  if (steal && steal.gain >= 3 && steal.air <= 2) return `Biggest steal: ${nm(steal.seat)} took ${steal.gain} pearl${steal.gain === 1 ? "" : "s"} with ${steal.air} air`;
+  if (close && close.gap === 1 && close.gain >= 2) return `Closest call: ${nm(close.seat)} won by 1 air`;
+  if (steal && steal.gain > 0 && steal.gain - steal.air >= 3) return `Biggest steal: ${nm(steal.seat)} took ${steal.gain} pearl${steal.gain === 1 ? "" : "s"} with ${steal.air} air`;
+  return null;
 }
-
 function home() {
   const nameIn = h("input", { id: "nm", maxlength: 20, placeholder: "Your name", value: myName(), autocomplete: "nickname", "aria-label": "Your name" });
   const err = h("div", { class: "err", role: "alert" });
@@ -293,9 +290,10 @@ function revealPanel(rv, names, title) {
   return h("div", {},
     h("h2", {}, title || `Tide ${rv.tide} reveal`),
     h("div", { class: "reveal" }, rv.wrecks.map((w, i) => {
-      const verdict = w.winner != null ? `${nm(w.winner)} takes ${w.gain ?? w.pearls} pearl${(w.gain ?? w.pearls) === 1 ? "" : "s"}${(w.gain ?? w.pearls) > w.pearls ? " (doubled)" : ""}${w.air ? " and +" + w.air + " air" : ""}` : w.tie ? (last ? "Silt-out! Tie, nobody takes it" : "Silt-out! Tie, it grows") : last ? "Nobody dived" : "Nobody dived, it grows";
-      return h("div", { class: "rw" + (w.winner != null ? " won" : "") + (w.tie ? " silt" : ""), style: `animation-delay:${i * 0.25}s` },
+      const verdict = w.winner != null ? `${nm(w.winner)} takes ${w.gain ?? w.pearls} pearl${(w.gain ?? w.pearls) === 1 ? "" : "s"}${(w.gain ?? w.pearls) > w.pearls ? " (doubled)" : ""}${w.air ? " and +" + w.air + " air" : ""}` : w.tie ? (last ? "Silt-out! Tie, nobody takes it" : "Silt-out! Tie, it grows") : last ? "No divers" : "No divers, it grows";
+      return h("div", { class: "rw" + (w.winner != null ? " won" : "") + (w.tie ? " silt" : "") + (!w.divers.length ? " empty" : ""), style: `animation-delay:${i * 0.25}s` },
         h("div", { class: "row sb" }, h("b", {}, `Wreck #${w.id}`), h("span", { class: "pearls" }, icon(PEARL), w.pearls)),
+        w.winner != null ? h("span", { class: "plus", "aria-hidden": "true" }, "+" + (w.gain ?? w.pearls)) : null,
         w.divers.length ? w.divers.map((d, j) => h("div", { class: "dv" + (w.winner === d.seat && j === 0 ? " top" : "") }, h("span", {}, nm(d.seat)), h("span", {}, d.air + " air"))) : null,
         h("div", { class: "verdict" }, verdict),
         why(w) ? h("div", { class: "why" }, why(w)) : null);
@@ -313,13 +311,18 @@ function roundLine(r, names) {
   return `Tide ${r.tide}: ` + (parts.join(" · ") || "quiet tide");
 }
 
-function standings(st) {
+function standings(st, rounds) {
   const order = [...st.players].sort((a, b) => b.pearls - a.pearls || b.air - a.air);
-  return h("table", { class: "stand" }, h("caption", { class: "sr" }, "Final standings"),
-    h("thead", {}, h("tr", {}, h("th", { scope: "col" }, "Diver"), h("th", { scope: "col" }, "Pearls"), h("th", { scope: "col" }, "Air left"))),
-    h("tbody", {}, order.map((p) => h("tr", { class: (st.winners || []).includes(p.seat) ? "w" : "" }, h("th", { scope: "row" }, p.name + ((st.winners || []).includes(p.seat) ? " 🏆" : "")), h("td", {}, p.pearls), h("td", {}, p.air)))));
+  const stats = rounds && rounds.length ? Object.fromEntries(matchStats(rounds, st.players).rows.map((r) => [r.seat, r])) : null;
+  const heads = ["Diver", "Pearls", "Air left"].concat(stats ? ["Won", "Ties", "Best dive"] : []);
+  return h("div", { class: "tw" }, h("table", { class: "stand st2" }, h("caption", { class: "sr" }, "Final standings"),
+    h("thead", {}, h("tr", {}, heads.map((c) => h("th", { scope: "col" }, c)))),
+    h("tbody", {}, order.map((p) => {
+      const r = stats && stats[p.seat], win = (st.winners || []).includes(p.seat);
+      return h("tr", { class: win ? "w" : "" }, h("th", { scope: "row" }, p.name + (win ? " 🏆" : "")), h("td", {}, p.pearls), h("td", {}, p.air),
+        r ? [h("td", {}, r.won), h("td", {}, r.ties), h("td", {}, r.best ? `#${r.best.id} for ${r.best.gain}` : "-")] : null);
+    }))));
 }
-
 function match(code) {
   const ac = new AbortController();
   let st = null, alive = true, ver = 0, offset = 0, token = tokenFor(code), logRounds = [], logTide = 0;
@@ -480,8 +483,8 @@ function match(code) {
     const out = [];
     out.push(h("section", { class: "card" }, h("div", { class: "hud" }, h("div", {}, finished ? h("b", {}, "Match over") : h("b", {}, `Tide ${curTide()} / ${st.tides}`), " ", !finished && st.tide === st.tides ? h("span", { class: "final" }, "Final tide: pearls count double") : null, " ", h("span", { class: "muted" }, "Code " + code)), h("div", { class: "row", style: "gap:8px" }, finished ? null : h("div", { id: "tleft", class: "muted" }, ""), helpBtn())), finished ? null : h("div", { class: "timer", role: "presentation" }, h("i"))));
     if (finished) {
-      const wn = (st.winners || []).map((s) => st.players[s].name);
-      out.push(h("section", { class: "card center" }, h("h1", {}, wn.length ? (wn.length > 1 ? "Shared victory: " : "Winner: ") + wn.join(" & ") : "No winner"), standings(st), logRounds.length ? statsView(logRounds, st.players) : null,
+      const wn = (st.winners || []).map((s) => st.players[s].name), hl = logRounds.length ? highlight(logRounds, st.players) : null;
+      out.push(h("section", { class: "card center" }, h("h1", {}, wn.length ? (wn.length > 1 ? "Shared victory: " : "Winner: ") + wn.join(" & ") : "No winner"), hl ? h("p", { class: "hlline" }, hl) : null, standings(st, logRounds),
         h("div", { class: "row", style: "justify-content:center;margin-top:14px" },
           st.you ? h("button", { class: "primary", onclick: playAgain }, !st.rematch ? "Rematch" : tokenFor(st.rematch) ? "Back to rematch" : "Join rematch") : null, h("a", { class: "btn", href: "/replay/" + code }, "Watch replay"), h("button", { class: "btn", "data-k": "copy", onclick: copyLink }, copied ? "Copied!" : "Copy replay link"), h("a", { class: "btn", href: "/" }, "Home")),
         st.you && st.rematch && !tokenFor(st.rematch) ? h("p", { class: "muted", role: "status" }, "Your table wants a rematch, same seats and settings.") : null,
@@ -493,14 +496,16 @@ function match(code) {
     out.push(playersPanel(st.players, { me: st.you && st.you.seat, winners: finished ? st.winners : [], hideStatus: finished, pausing }));
     if (rev && (pausing || finished)) out.push(rev);
     if (!finished) {
+      const mv = st.you && st.you.move;
       const fw = animW !== st.status + curTide(); animW = st.status + curTide();
-      out.push(h("section", { class: "card" }, h("h2", {}, "Wrecks"), h("div", { class: fw ? "wrecks fresh" : "wrecks" }, st.wrecks.map((w) => {
+      out.push(h("section", { class: "card" }, h("h2", {}, "Wrecks", mv && mv.rest ? h("span", { class: "mine rest" }, "your move: resting") : null), h("div", { class: fw ? "wrecks fresh" : "wrecks" }, st.wrecks.map((w) => {
         const can = st.you && st.you.legal;
         const label = [`Wreck ${w.id}`, `${w.pearls} ${w.pearls === 1 ? "pearl" : "pearls"}`, w.air ? `air pocket +${w.air}` : null, w.age ? "grew " + (w.age === 1 ? "once" : w.age === 2 ? "twice" : w.age + " times") : null].filter(Boolean).join(", ");
         return h("button", { class: "wreck", "data-k": "w" + w.id, "aria-label": label, "aria-pressed": sel === w.id ? "true" : "false", disabled: !can, onclick: () => { sel = sel === w.id ? null : w.id; render(); } },
           h("div", { class: "pv" }, icon(PEARL), w.pearls, h("span", { class: "sub" }, w.pearls === 1 ? "pearl" : "pearls")), h("div", { class: "sub" }, `Wreck #${w.id}`),
           w.air ? h("span", { class: "badge air" }, icon(POCKET), ` air pocket +${w.air}`) : null,
-          w.age ? h("span", { class: "badge grew" }, `grew ${w.age}×`) : null);
+          w.age ? h("span", { class: "badge grew" }, `grew ${w.age}×`) : null,
+          mv && !mv.rest && mv.wreck === w.id ? h("span", { class: "mine" }, `your bid: ${mv.air} air`) : null);
       }))));
       out.push(actionView());
     }
