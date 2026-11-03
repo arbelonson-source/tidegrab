@@ -27,6 +27,13 @@ export const strategies = {
     if (r() < 0.2) return { rest: true };
     return { wreck: g.wrecks[Math.floor(r() * g.wrecks.length)].id, air: 1 + Math.floor(r() * air) };
   },
+  sample: (g, s, r) => {
+    const air = g.players[s].air;
+    if (air < 1 || (air < 3 && r() < 0.6)) return { rest: true };
+    const v = (w) => w.pearls + 3 * w.air;
+    const best = g.wrecks.reduce((a, b) => (v(b) > v(a) ? b : a));
+    return { wreck: best.id, air: Math.max(1, Math.min(air, Math.round(air * 0.3 + v(best) * 0.25 + (r() * 2 - 1)))) };
+  },
   restHeavy: (g, s) => {
     const air = g.players[s].air;
     return air < 6 ? { rest: true } : { wreck: biggest(g).id, air: 4 };

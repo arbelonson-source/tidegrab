@@ -217,6 +217,12 @@ function home() {
     const code = codeIn.value.trim().toUpperCase();
     if (code.length < 4) throw new Error("Enter the match code");
     store.set("tg:name", nameIn.value.trim());
+    if (!store.get("tg:t:" + code)) {
+      try {
+        const r = await api(`/matches/${code}/join`, { body: { name: nameIn.value } });
+        store.set("tg:t:" + code, r.token);
+      } catch (e) { if (/no such match/i.test(e.message)) throw new Error("No match with code " + code); }
+    }
     go("/m/" + code);
   });
 
@@ -339,6 +345,7 @@ function match(code) {
     render();
   }
 
+  let endAt = 0;
   async function loop() {
     while (alive) {
       try {
@@ -357,7 +364,12 @@ function match(code) {
         }
         announceState();
         render();
-        if (s.status === "finished" || s.status === "expired") return;
+        if (s.status === "expired") return;
+        if (s.status === "finished") {
+          endAt = endAt || Date.now();
+          const others = s.players.filter((p) => p.kind === "human").length > 1;
+          if (!s.you || s.rematch || !others || Date.now() - endAt > 600000) return;
+        }
       } catch (e) {
         if (!alive) return;
         if (e.status === 404) { root.replaceChildren(h("section", { class: "card center" }, h("h2", {}, "No such match"), h("p", {}, `There is no match with code ${code}.`), h("a", { class: "btn primary", href: "/" }, "Back home"))); return; }
@@ -471,7 +483,8 @@ function match(code) {
       const wn = (st.winners || []).map((s) => st.players[s].name);
       out.push(h("section", { class: "card center" }, h("h1", {}, wn.length ? (wn.length > 1 ? "Shared victory: " : "Winner: ") + wn.join(" & ") : "No winner"), standings(st), logRounds.length ? statsView(logRounds, st.players) : null,
         h("div", { class: "row", style: "justify-content:center;margin-top:14px" },
-          st.you ? h("button", { class: "primary", onclick: playAgain }, "Play again") : null, h("a", { class: "btn", href: "/replay/" + code }, "Watch replay"), h("button", { class: "btn", "data-k": "copy", onclick: copyLink }, copied ? "Copied!" : "Copy replay link"), h("a", { class: "btn", href: "/" }, "Home")),
+          st.you ? h("button", { class: "primary", onclick: playAgain }, !st.rematch ? "Rematch" : tokenFor(st.rematch) ? "Back to rematch" : "Join rematch") : null, h("a", { class: "btn", href: "/replay/" + code }, "Watch replay"), h("button", { class: "btn", "data-k": "copy", onclick: copyLink }, copied ? "Copied!" : "Copy replay link"), h("a", { class: "btn", href: "/" }, "Home")),
+        st.you && st.rematch && !tokenFor(st.rematch) ? h("p", { class: "muted", role: "status" }, "Your table wants a rematch, same seats and settings.") : null,
         showLink ? h("input", { class: "rlink", readonly: true, value: replayUrl(), "aria-label": "Replay link", onfocus: (e) => e.target.select() }) : null));
     }
     const pausing = !finished && isPausing();
@@ -507,9 +520,15 @@ function match(code) {
 
   async function playAgain() {
     try {
-      const bots = st.players.filter((p) => p.kind === "bot").length;
-      await createMatch({ name: st.you.name || myName(), seats: st.settings.seats, bots, turnSeconds: st.settings.turnSeconds, botLevel: st.settings.botLevel });
-    } catch (e) { toast(e.message); }
+      const r = await api(`/matches/${code}/rematch`, { body: {}, token });
+      store.set("tg:t:" + r.code, r.token);
+      go("/m/" + r.code);
+    } catch {
+      try {
+        const bots = st.players.filter((p) => p.kind === "bot").length;
+        await createMatch({ name: st.you.name || myName(), seats: st.settings.seats, bots, turnSeconds: st.settings.turnSeconds, botLevel: st.settings.botLevel });
+      } catch (e) { toast(e.message); }
+    }
   }
 
   function render() {

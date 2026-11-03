@@ -29,6 +29,7 @@ const State = obj({
   wrecks: { type: "array", items: ref("Wreck") },
   lastReveal: { oneOf: [ref("Reveal"), { type: "null" }] },
   winners: { type: ["array", "null"], items: { type: "integer" } },
+  rematch: { type: ["string", "null"], description: "Code of the rematch, once someone asked for one" },
   you: obj({ seat: int("Your seat"), name: str("Your name"), isHost: { type: "boolean" }, move: { oneOf: [ref("Move"), { type: "null" }] }, legal: obj({ rest: { type: "boolean" }, wrecks: { type: "array", items: { type: "integer" } }, minAir: int("Smallest legal bid"), maxAir: int("Largest legal bid") }) }),
 });
 const Joined = obj({ code: str("Match code"), seat: int("Your seat"), token: str("Secret token for this seat"), url: str("Page to watch or play") });
@@ -50,6 +51,7 @@ export function openapi(origin) {
       "/api/matches/{code}/bots": { post: { summary: "Host only: fill free seats with bots", parameters: [code], security: auth, requestBody: { content: { "application/json": { schema: obj({ count: int("How many", { default: 1 }) }) } } }, responses: { 200: json(ref("State")), ...errs } } },
       "/api/matches/{code}/start": { post: { summary: "Host only: start now; free seats get bots", parameters: [code], security: auth, responses: { 200: json(ref("State")), ...errs } } },
       "/api/matches/{code}/move": { post: { summary: "Your move for this tide; you can change it until the tide resolves", parameters: [code], security: auth, requestBody: { required: true, content: { "application/json": { schema: ref("Move") } } }, responses: { 200: json(obj({ ok: { type: "boolean" }, tide: int("Tide"), move: ref("Move"), version: int("New version") })), ...errs } } },
+      "/api/matches/{code}/rematch": { post: { summary: "After the match: open or join a rematch with the same table; asking again returns the same seat", parameters: [code], security: auth, responses: { 200: json(ref("Joined")), ...errs } } },
       "/api/matches/{code}/log": { get: { summary: "Replay log; seed is shown once the match is over", parameters: [code], responses: { 200: json(obj({ code: str("Code"), status: str("Status"), seed: { type: ["integer", "null"] }, names: { type: "array", items: { type: "string" } }, kinds: { type: "array", items: { type: "string" } }, rounds: { type: "array", items: { type: "object" } }, winners: { type: ["array", "null"], items: { type: "integer" } } })), ...errs } } },
       "/healthz": { get: { summary: "Liveness check", responses: { 200: json(obj({ ok: { type: "boolean" } })) } } },
     },

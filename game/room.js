@@ -316,6 +316,7 @@ export class MatchRoom {
       wrecks: g && !g.finished ? g.wrecks.map((w) => ({ ...w })) : [],
       lastReveal: g && g.history.length ? g.history[g.history.length - 1] : null,
       winners: g && g.finished ? g.winners : null,
+      rematch: d.rematch ? d.rematch.code : null,
       rules: { text: RULES_TEXT, ...RULES },
     };
     if (seat !== null) {
@@ -383,7 +384,7 @@ export class MatchRoom {
       const wait = query.wait;
       if (wait !== undefined && wait !== null && wait !== "") {
         if (!/^\d{1,9}$/.test(String(wait))) throw new ApiError(400, "wait must be the version number you last saw, e.g. ?wait=12");
-        if (d.version <= Number(wait) && d.status !== "finished") await this.waitForChange(Number(wait), 25000);
+        if (d.version <= Number(wait)) await this.waitForChange(Number(wait), 25000);
       }
       return { status: 200, json: this.publicState(seat) };
     }
@@ -404,6 +405,22 @@ export class MatchRoom {
       };
     }
     if (method !== "POST") throw new ApiError(405, "use POST");
+    if (sub === "rematch:info" || sub === "rematch:set") {
+      const seat = this.seatOf(token);
+      if (seat === null) throw new ApiError(401, NO_TOKEN);
+      if (d.status !== "finished") throw new ApiError(400, "the match is not over yet");
+      const r = d.rematch || (d.rematch = { code: null, seats: {} });
+      if (sub === "rematch:info") {
+        if (r.seats[seat]) return { status: 200, json: { mine: r.seats[seat] } };
+        const bots = d.seats.filter((x) => x.kind === "bot").length;
+        return { status: 200, json: { next: r.code, name: d.seats[seat].name, seats: d.settings.seats, bots, turnSeconds: d.settings.turnSeconds, botLevel: d.settings.botLevel } };
+      }
+      const { code, seat: s2, token: t2, url } = body;
+      if (!r.code) r.code = code;
+      r.seats[seat] = { code, seat: s2, token: t2, url };
+      this.commit(true);
+      return { status: 200, json: r.seats[seat] };
+    }
     if (sub === "join") {
       if (d.seats.every(Boolean)) throw new ApiError(400, d.status === "lobby" ? "the lobby is full" : "the match is full and already running, watch it instead");
       this.requireLobby();
