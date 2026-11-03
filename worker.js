@@ -1,5 +1,5 @@
 import { MatchRoom, ApiError } from "./game/room.js";
-import { Registry } from "./game/registry.js";
+import { Registry, ipKey } from "./game/registry.js";
 import { route } from "./game/api.js";
 
 const CORS = {
@@ -67,6 +67,14 @@ function makeStore(env) {
   };
 }
 
+async function allowed(env, key) {
+  try {
+    return !env.LIMIT || (await env.LIMIT.limit({ key })).success;
+  } catch {
+    return true;
+  }
+}
+
 export default {
   async fetch(request, env) {
     try {
@@ -75,7 +83,9 @@ export default {
       if (url.pathname === "/healthz") return reply(200, { ok: true });
       if (!url.pathname.startsWith("/api/")) return env.ASSETS.fetch(request);
       const ip = request.headers.get("cf-connecting-ip") || null;
-      rateLimit(ip || "?");
+      const key = ipKey(ip) || "?";
+      rateLimit(key);
+      if (!(await allowed(env, key))) throw new ApiError(429, "too many requests, slow down");
       const body = await readBody(request);
       const h = request.headers.get("authorization");
       const token = h && /^bearer /i.test(h) ? h.slice(7).trim() : body.token || null;

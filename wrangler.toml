@@ -19,3 +19,8 @@ class_name = "LobbyDO"
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["MatchDO", "LobbyDO"]
+
+[[ratelimits]]
+name = "LIMIT"
+namespace_id = "1001"
+simple = { limit = 300, period = 10 }

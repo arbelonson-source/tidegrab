@@ -6,6 +6,18 @@ export const MAX_LOBBIES = 200;
 export const MAX_PER_IP = 5;
 const STALE_MS = 3 * 3600000;
 
+// One person on IPv6 usually holds a whole /64, so count those as one address.
+export function ipKey(ip) {
+  if (!ip) return null;
+  const v = String(ip).trim().toLowerCase().replace(/^::ffff:(?=\d+\.)/, "");
+  if (!v.includes(":")) return v;
+  const [head, tail] = v.split("::");
+  const a = head ? head.split(":") : [];
+  const b = tail !== undefined && tail ? tail.split(":") : [];
+  const full = tail === undefined ? a : [...a, ...Array(8 - a.length - b.length).fill("0"), ...b];
+  return full.slice(0, 4).map((x) => x.replace(/^0+(?=.)/, "")).join(":") + "::/64";
+}
+
 export class Registry {
   constructor(items) {
     this.items = new Map(Object.entries(items || {}));
@@ -22,11 +34,12 @@ export class Registry {
   }
 
   checkCapacity(ip) {
+    ip = ipKey(ip);
     this.prune();
     if (ip) {
       let mine = 0;
-      for (const s of this.items.values()) if (s.status === "lobby" && s.ip === ip) mine++;
-      if (mine >= MAX_PER_IP) return `you already have ${MAX_PER_IP} open lobbies, start or let one expire first`;
+      for (const s of this.items.values()) if (s.ip === ip && (s.status === "lobby" || s.status === "playing")) mine++;
+      if (mine >= MAX_PER_IP) return `you already have ${MAX_PER_IP} open or running matches, finish or let one expire first`;
     }
     if (this.count("playing") >= MAX_LIVE) return "the server is busy with too many live matches, try again in a minute";
     if (this.count("lobby") >= MAX_LOBBIES) return "too many open lobbies, try again in a minute";
@@ -43,7 +56,7 @@ export class Registry {
   }
 
   reserve(code, ip) {
-    this.items.set(code, { code, status: "lobby", createdAt: Date.now(), ip: ip || null });
+    this.items.set(code, { code, status: "lobby", createdAt: Date.now(), ip: ipKey(ip) });
   }
 
   update(summary) {

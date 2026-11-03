@@ -29,13 +29,14 @@ npm run sim             # balance tournament (GAMES=10000 by default)</code></pr
 <div class="tablewrap"><table><thead><tr><th scope="col">Endpoint</th><th scope="col">Purpose</th></tr></thead><tbody>
 <tr><td><code>GET /api/rules</code></td><td>Rule constants and the rules text</td></tr>
 <tr><td><code>GET /api/matches</code></td><td><code>{open: [...], live: [...]}</code>: open lobbies and running matches</td></tr>
-<tr><td><code>POST /api/matches</code></td><td>Create a match: <code>{"name","seats":2-4,"bots":0-3,"turnSeconds":5-120,"botLevel":"normal"|"easy"}</code> (defaults: 2 seats, 0 bots, 45 s, normal; bots at most seats - 1). Returns <code>{code, seat, token, url}</code>. You are the host, seat 0.</td></tr>
+<tr><td><code>POST /api/matches</code></td><td>Create a match: <code>{"name","seats":2-4,"bots":0-3,"turnSeconds":5-120,"botLevel":"normal"|"easy"|"hard"}</code> (defaults: 2 seats, 0 bots, 45 s, normal; bots at most seats - 1). Returns <code>{code, seat, token, url}</code>. You are the host, seat 0.</td></tr>
 <tr><td><code>POST /api/matches/CODE/join</code></td><td><code>{"name"}</code> returns <code>{seat, token, url}</code>. The match starts by itself as soon as every seat is filled.</td></tr>
 <tr><td><code>POST /api/matches/CODE/bots</code></td><td>Host only: <code>{"count":1}</code> adds bots to empty seats</td></tr>
 <tr><td><code>POST /api/matches/CODE/start</code></td><td>Host only: fills empty seats with bots and starts</td></tr>
 <tr><td><code>GET /api/matches/CODE?wait=V</code></td><td>The state (fields below). With <code>wait</code>, the call holds up to 25 s until <code>version</code> is greater than <code>V</code>, so a loop never needs to sleep. With a token it includes <code>you</code>.</td></tr>
 <tr><td><code>POST /api/matches/CODE/move</code></td><td><code>{"wreck": ID, "air": N}</code> to dive or <code>{"rest": true}</code> to rest (<code>"rest": false</code> next to a dive is fine). Returns <code>{ok, tide, move, version}</code>. Sending again before the tide resolves replaces your move.</td></tr>
 <tr><td><code>GET /api/matches/CODE/log</code></td><td>The full match log, for replays</td></tr>
+<tr><td><code>GET /api/openapi.json</code></td><td>OpenAPI 3.1 description of every endpoint, for code generators and tool-calling agents</td></tr>
 <tr><td><code>GET /healthz</code></td><td><code>{ok: true}</code></td></tr>
 </tbody></table></div>
 <pre><code>curl -s -X POST $BASE/api/matches -d '{"name":"agent","seats":2,"bots":1}'
@@ -62,19 +63,20 @@ while True:
     if s["status"] == "playing" and not s["you"]["move"]:
         w, a = s["wrecks"][0]["id"], min(2, s["you"]["legal"]["maxAir"])
         call(f"/api/matches/{m['code']}/move", {"wreck": w, "air": a} if a else {"rest": True}, m["token"])</code></pre>
-<p>Sample bot: <code>python3 bots/sample_bot.py</code> creates a match against a house bot and plays it (stdlib only). To join a friend's match: <code>python3 bots/sample_bot.py --code ABCDE --name MyBot</code>. Use <code>--server http://localhost:8790</code> for a local server.</p>
+<p>Sample bot: <code>python3 bots/sample_bot.py</code> creates a match against a house bot and plays it (stdlib only). To join a friend's match: <code>python3 bots/sample_bot.py --code ABCDE --name MyBot</code>. Use <code>--server http://localhost:8790</code> for a local server. The same bot in JavaScript (Node 18+, no packages): <code>node bots/sample_bot.mjs</code>, with the same options.</p>
 <p>Replay log (<code>GET /log</code>): <code>{code, status, seed, settings, rules, names, kinds, rounds, winners}</code>. Each round has <code>tide</code>, <code>before</code> (wrecks and players at the start), <code>moves</code> (<code>seat, wreck, air</code> or <code>rest</code>, <code>auto</code> if timed out), <code>results</code> (per wreck: <code>divers</code>, <code>winner</code>, <code>tie</code>, <code>gain</code>) and <code>standings</code>. The game is deterministic from <code>seed</code>, which is shown once the match is over.</p>
 <h2>Design notes</h2>
-<p>Every tide is a bet: diving big wins a wreck but burns Air you need later, tying wastes everyone's Air, and resting is safe but leaves wrecks to rivals. <code>node sim.js</code> plays thousands of seeded games between fixed strategies and the built-in bot (10,000 games per table, win share against a field of smart bots; a fair share is 50 / 33 / 25 percent for 2 / 3 / 4 players):</p>
+<p>Every tide is a bet: diving big wins a wreck but burns Air you need later, tying wastes everyone's Air, and resting is safe but leaves wrecks to rivals. <code>node sim.js</code> plays thousands of seeded games between fixed strategies and the built-in bots (10,000 games per row). Each row is one strategy against a field of normal bots; a fair share is 50 / 33 / 25 percent for 2 / 3 / 4 players:</p>
 <div class="tablewrap"><table><thead><tr><th scope="col">Strategy</th><th scope="col">2 players</th><th scope="col">3 players</th><th scope="col">4 players</th></tr></thead><tbody>
-<tr><td>smart bot</td><td>49.6</td><td>33.7</td><td>25.4</td></tr>
-<tr><td>rest-heavy</td><td>38.5</td><td>37.6</td><td>27.7</td></tr>
-<tr><td>always big bid</td><td>38.8</td><td>20.5</td><td>18.7</td></tr>
-<tr><td>easy bot</td><td>17.1</td><td>24.8</td><td>14.3</td></tr>
-<tr><td>random</td><td>15.8</td><td>23.0</td><td>15.5</td></tr>
-<tr><td>cheap 1-Air dodger</td><td>12.8</td><td>21.4</td><td>10.0</td></tr>
+<tr><td>hard bot</td><td>66.8</td><td>62.0</td><td>49.5</td></tr>
+<tr><td>normal bot</td><td>49.4</td><td>34.1</td><td>25.2</td></tr>
+<tr><td>rest-heavy</td><td>41.0</td><td>38.2</td><td>30.2</td></tr>
+<tr><td>always big bid</td><td>37.3</td><td>18.7</td><td>16.9</td></tr>
+<tr><td>easy bot</td><td>17.9</td><td>23.5</td><td>14.4</td></tr>
+<tr><td>random</td><td>16.7</td><td>22.6</td><td>15.2</td></tr>
+<tr><td>cheap 1-Air dodger</td><td>12.0</td><td>17.9</td><td>9.1</td></tr>
 </tbody></table></div>
-<p>(Shares do not sum to 100 because each row is run in its own table against smart opponents.) The smart bot clearly beats random (about 51 percent against 31 percent in a mixed 3-player table), and no fixed strategy wins everywhere: big bids fall apart with more players, rest-heavy play is strong but loses to a smart bot at two players. No rule constants were changed.</p>
+<p>No fixed strategy wins everywhere. Big bids fall apart with more players, and rest-heavy play is a little ahead at three and four players but loses at two and is easy to read once you see it. The hard bot looks one tide ahead and plays against what normal bots would do, so it beats them clearly. In a mixed table, where every seat is drawn at random from all seven strategies, it is not on top: at three players the normal bot takes 44.7 percent, the hard bot 43.4 and rest-heavy 40.0, because the hard bot never adapts to how a real opponent plays.</p>
 <h2>License</h2>
 <p>MIT, see <code>LICENSE</code>.</p>
 </main>

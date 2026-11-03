@@ -33,13 +33,14 @@ Base URL: `https://tidegrab.arbelonski.workers.dev` (or your own server). Bodies
 |---|---|
 | `GET /api/rules` | Rule constants and the rules text |
 | `GET /api/matches` | `{open: [...], live: [...]}`: open lobbies and running matches |
-| `POST /api/matches` | Create a match: `{"name","seats":2-4,"bots":0-3,"turnSeconds":5-120,"botLevel":"normal"\|"easy"}` (defaults: 2 seats, 0 bots, 45 s, normal; bots at most seats - 1). Returns `{code, seat, token, url}`. You are the host, seat 0. |
+| `POST /api/matches` | Create a match: `{"name","seats":2-4,"bots":0-3,"turnSeconds":5-120,"botLevel":"normal"\|"easy"\|"hard"}` (defaults: 2 seats, 0 bots, 45 s, normal; bots at most seats - 1). Returns `{code, seat, token, url}`. You are the host, seat 0. |
 | `POST /api/matches/CODE/join` | `{"name"}` returns `{seat, token, url}`. The match starts by itself as soon as every seat is filled. |
 | `POST /api/matches/CODE/bots` | Host only: `{"count":1}` adds bots to empty seats |
 | `POST /api/matches/CODE/start` | Host only: fills empty seats with bots and starts |
 | `GET /api/matches/CODE?wait=V` | The state (fields below). With `wait`, the call holds up to 25 s until `version` is greater than `V`, so a loop never needs to sleep. With a token it includes `you`. |
 | `POST /api/matches/CODE/move` | `{"wreck": ID, "air": N}` to dive or `{"rest": true}` to rest (`"rest": false` next to a dive is fine). Returns `{ok, tide, move, version}`. Sending again before the tide resolves replaces your move. |
 | `GET /api/matches/CODE/log` | The full match log, for replays |
+| `GET /api/openapi.json` | OpenAPI 3.1 description of every endpoint, for code generators and tool-calling agents |
 | `GET /healthz` | `{ok: true}` |
 
 ```
@@ -77,24 +78,25 @@ while True:
         call(f"/api/matches/{m['code']}/move", {"wreck": w, "air": a} if a else {"rest": True}, m["token"])
 ```
 
-Sample bot: `python3 bots/sample_bot.py` creates a match against a house bot and plays it (stdlib only). To join a friend's match: `python3 bots/sample_bot.py --code ABCDE --name MyBot`. Use `--server http://localhost:8790` for a local server.
+Sample bot: `python3 bots/sample_bot.py` creates a match against a house bot and plays it (stdlib only). To join a friend's match: `python3 bots/sample_bot.py --code ABCDE --name MyBot`. Use `--server http://localhost:8790` for a local server. The same bot in JavaScript (Node 18+, no packages): `node bots/sample_bot.mjs`, with the same options.
 
 Replay log (`GET /log`): `{code, status, seed, settings, rules, names, kinds, rounds, winners}`. Each round has `tide`, `before` (wrecks and players at the start), `moves` (`seat, wreck, air` or `rest`, `auto` if timed out), `results` (per wreck: `divers`, `winner`, `tie`, `gain`) and `standings`. The game is deterministic from `seed`, which is shown once the match is over.
 
 ## Design notes
 
-Every tide is a bet: diving big wins a wreck but burns Air you need later, tying wastes everyone's Air, and resting is safe but leaves wrecks to rivals. `node sim.js` plays thousands of seeded games between fixed strategies and the built-in bot (10,000 games per table, win share against a field of smart bots; a fair share is 50 / 33 / 25 percent for 2 / 3 / 4 players):
+Every tide is a bet: diving big wins a wreck but burns Air you need later, tying wastes everyone's Air, and resting is safe but leaves wrecks to rivals. `node sim.js` plays thousands of seeded games between fixed strategies and the built-in bots (10,000 games per row). Each row is one strategy against a field of normal bots; a fair share is 50 / 33 / 25 percent for 2 / 3 / 4 players:
 
 | Strategy | 2 players | 3 players | 4 players |
 |---|---|---|---|
-| smart bot | 49.6 | 33.7 | 25.4 |
-| rest-heavy | 38.5 | 37.6 | 27.7 |
-| always big bid | 38.8 | 20.5 | 18.7 |
-| easy bot | 17.1 | 24.8 | 14.3 |
-| random | 15.8 | 23.0 | 15.5 |
-| cheap 1-Air dodger | 12.8 | 21.4 | 10.0 |
+| hard bot | 66.8 | 62.0 | 49.5 |
+| normal bot | 49.4 | 34.1 | 25.2 |
+| rest-heavy | 41.0 | 38.2 | 30.2 |
+| always big bid | 37.3 | 18.7 | 16.9 |
+| easy bot | 17.9 | 23.5 | 14.4 |
+| random | 16.7 | 22.6 | 15.2 |
+| cheap 1-Air dodger | 12.0 | 17.9 | 9.1 |
 
-(Shares do not sum to 100 because each row is run in its own table against smart opponents.) The smart bot clearly beats random (about 51 percent against 31 percent in a mixed 3-player table), and no fixed strategy wins everywhere: big bids fall apart with more players, rest-heavy play is strong but loses to a smart bot at two players. No rule constants were changed.
+No fixed strategy wins everywhere. Big bids fall apart with more players, and rest-heavy play is a little ahead at three and four players but loses at two and is easy to read once you see it. The hard bot looks one tide ahead and plays against what normal bots would do, so it beats them clearly. In a mixed table, where every seat is drawn at random from all seven strategies, it is not on top: at three players the normal bot takes 44.7 percent, the hard bot 43.4 and rest-heavy 40.0, because the hard bot never adapts to how a real opponent plays.
 
 ## License
 

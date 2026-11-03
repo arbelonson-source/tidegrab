@@ -73,10 +73,49 @@ function normalMove(g, seat, rnd) {
   return options[0].move;
 }
 
+// One step of look-ahead: sample what the rivals might do with the normal
+// model, then pick the move that leaves us furthest ahead on average.
+function settle(g, moves, seat, lam, mult, last) {
+  const pearls = g.players.map((p) => p.pearls);
+  const air = g.players.map((p, i) => p.air + (moves[i].rest ? RULES.restGain : -moves[i].air));
+  for (const w of g.wrecks) {
+    let top = 0, who = -1;
+    moves.forEach((m, i) => {
+      if (m.wreck !== w.id) return;
+      if (m.air > top) { top = m.air; who = i; } else if (m.air === top) who = -1;
+    });
+    if (who >= 0) { pearls[who] += w.pearls * mult; air[who] += w.air; }
+  }
+  const val = (i) => pearls[i] + lam * Math.min(RULES.maxAir, air[i] + RULES.tideGain);
+  let rival = -Infinity;
+  for (let i = 0; i < pearls.length; i++) if (i !== seat) rival = Math.max(rival, val(i));
+  const lead = val(seat) - rival;
+  return last ? (lead > 0 ? 10 : 0) + 0.1 * lead : lead + 0.5 * val(seat);
+}
+
+function hardMove(g, seat, rnd, samples = 16) {
+  const me = g.players[seat];
+  const lam = airValue(g);
+  const mult = payout(g);
+  const last = g.tide >= g.tides;
+  const cands = [{ rest: true }];
+  for (const w of g.wrecks) for (let b = 1; b <= me.air; b++) cands.push({ wreck: w.id, air: b });
+  const worlds = Array.from({ length: samples }, () => g.players.map((p) => (p.seat === seat ? null : normalMove(g, p.seat, rnd))));
+  let best = cands[0], bestScore = -Infinity;
+  for (const c of cands) {
+    let s = rnd() * 1e-6;
+    for (const w of worlds) { w[seat] = c; s += settle(g, w, seat, lam, mult, last); }
+    if (s > bestScore) { bestScore = s; best = c; }
+  }
+  return best;
+}
+
+export const LEVELS = ["easy", "normal", "hard"];
+
 export function chooseMove(g, seat, level = "normal", rnd = Math.random) {
   let move;
   try {
-    move = level === "easy" ? easyMove(g, seat, rnd) : normalMove(g, seat, rnd);
+    move = level === "easy" ? easyMove(g, seat, rnd) : level === "hard" ? hardMove(g, seat, rnd) : normalMove(g, seat, rnd);
   } catch {
     move = null;
   }

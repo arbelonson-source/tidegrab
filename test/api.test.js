@@ -121,3 +121,12 @@ test("one address can only hold a few open lobbies", async () => {
   assert.equal(last.status, 429);
   assert.ok(codes.length <= 5);
 });
+
+test("openapi description lists every endpoint", async () => {
+  const r = await call("/api/openapi.json");
+  assert.equal(r.status, 200);
+  assert.equal(r.json.openapi, "3.1.0");
+  for (const p of ["/api/rules", "/api/matches", "/api/matches/{code}", "/api/matches/{code}/join", "/api/matches/{code}/bots", "/api/matches/{code}/start", "/api/matches/{code}/move", "/api/matches/{code}/log", "/healthz"]) assert.ok(r.json.paths[p], p);
+  const refs = JSON.stringify(r.json).match(/#\/components\/schemas\/\w+/g);
+  for (const ref of refs) assert.ok(r.json.components.schemas[ref.split("/").pop()], ref);
+});

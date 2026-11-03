@@ -1,5 +1,5 @@
 import { RULES, createGame, checkMove, normalizeMove, resolveTide } from "../engine.js";
-import { chooseMove } from "../bots/brain.js";
+import { chooseMove, LEVELS } from "../bots/brain.js";
 
 const BOT_NAMES = ["Coral", "Kelp", "Manta", "Brine", "Nacre", "Squall", "Abyss", "Tern"];
 const LOBBY_TTL = 900000;
@@ -76,7 +76,7 @@ export function parseCreate(body) {
   const turnSeconds = body.turnSeconds === undefined ? 45 : body.turnSeconds;
   if (!Number.isInteger(turnSeconds) || turnSeconds < 5 || turnSeconds > 120) throw new ApiError(400, "turnSeconds must be a whole number from 5 to 120");
   const botLevel = body.botLevel === undefined ? "normal" : body.botLevel;
-  if (botLevel !== "easy" && botLevel !== "normal") throw new ApiError(400, "botLevel must be 'easy' or 'normal'");
+  if (!LEVELS.includes(botLevel)) throw new ApiError(400, "botLevel must be one of: " + LEVELS.join(", "));
   return { seats, bots, turnSeconds, botLevel, name: cleanName(body.name, "Diver") };
 }
 

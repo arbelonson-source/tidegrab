@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { MatchRoom, ApiError } from "./game/room.js";
-import { Registry } from "./game/registry.js";
+import { Registry, ipKey } from "./game/registry.js";
 import { route } from "./game/api.js";
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -194,7 +194,7 @@ export function startServer(opts = {}) {
     return sendFile(res, file);
   }
 
-  async function api(req, res, url) {
+  async function api(req, res, url, ip) {
     const body = req.method === "POST" ? await readBody(req) : {};
     const h = req.headers.authorization;
     const token = h && /^bearer /i.test(h) ? h.slice(7).trim() : body.token || null;
@@ -206,7 +206,7 @@ export function startServer(opts = {}) {
       token,
       query: Object.fromEntries(url.searchParams),
       origin: `${proto}://${req.headers.host}`,
-      ip: req.socket.remoteAddress || null,
+      ip,
     });
     send(res, out.status, out.json);
   }
@@ -218,8 +218,8 @@ export function startServer(opts = {}) {
       if (req.method === "OPTIONS") return send(res, 204, {});
       if (url.pathname === "/healthz") return send(res, 200, { ok: true, matches: rooms.size });
       if (url.pathname.startsWith("/api/")) {
-        rateLimit(ip);
-        return await api(req, res, url);
+        rateLimit(ipKey(ip) || "?");
+        return await api(req, res, url, ip === "?" ? null : ip);
       }
       if (req.method !== "GET") throw new ApiError(405, "use GET");
       return serveStatic(res, url);

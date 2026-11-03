@@ -1,5 +1,6 @@
 import { RULES } from "../engine.js";
 import { RULES_TEXT, ApiError, parseCreate } from "./room.js";
+import { openapi } from "./openapi.js";
 
 // store: { list(), create(params) -> {code, seat, token}, match(code) -> {handle(...)}|null }
 export async function route(store, req) {
@@ -7,6 +8,10 @@ export async function route(store, req) {
   if (parts[0] === "rules") {
     if (method !== "GET") throw new ApiError(405, "use GET");
     return { status: 200, json: { ...RULES, text: RULES_TEXT } };
+  }
+  if (parts[0] === "openapi.json" && parts.length === 1) {
+    if (method !== "GET") throw new ApiError(405, "use GET");
+    return { status: 200, json: openapi(origin) };
   }
   if (parts[0] !== "matches") throw new ApiError(404, "unknown endpoint, see /docs");
   if (parts.length === 1) {

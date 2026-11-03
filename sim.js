@@ -16,6 +16,7 @@ const biggest = (g) => g.wrecks.reduce((a, b) => (b.pearls + b.air > a.pearls + 
 export const strategies = {
   smart: (g, s, r) => chooseMove(g, s, "normal", r),
   easy: (g, s, r) => chooseMove(g, s, "easy", r),
+  hard: (g, s, r) => chooseMove(g, s, "hard", r),
   bigHigh: (g, s) => {
     const air = g.players[s].air;
     return { wreck: biggest(g).id, air: Math.max(1, Math.ceil(air * 0.8)) };

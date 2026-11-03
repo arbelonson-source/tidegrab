@@ -108,6 +108,96 @@ async function createMatch(opts) {
   go("/m/" + made.code);
 }
 
+const sv = (inner) => `<svg viewBox="0 0 120 64" width="120" height="64" aria-hidden="true" focusable="false">${inner}</svg>`;
+const HELP_ART = [
+  sv('<g fill="none" stroke="#3fd6c8" stroke-width="2"><path d="M8 52h30l-4-18H14z" fill="#0a2a44"/><path d="M62 52h30l-4-18H66z" fill="#0a2a44"/></g><circle cx="26" cy="26" r="6" fill="#f2c14e"/><rect x="82" y="8" width="30" height="18" rx="5" fill="#16425f" stroke="#3fd6c8"/><text x="97" y="21" text-anchor="middle" font-size="11" fill="#e6f6f8" font-family="sans-serif">air 3</text><path d="M97 28v8" stroke="#f2c14e" stroke-width="2"/>'),
+  sv('<path d="M6 54h46l-5-20H11z" fill="#0a2a44" stroke="#3fd6c8" stroke-width="2"/><circle cx="29" cy="26" r="6" fill="#f2c14e"/><text x="29" y="12" text-anchor="middle" font-size="11" fill="#e6f6f8" font-family="sans-serif">5 vs 3</text><path d="M70 54h46l-5-20H75z" fill="#0a2a44" stroke="#ff8a7a" stroke-width="2" stroke-dasharray="4 3"/><circle cx="93" cy="26" r="6" fill="#f2c14e"/><circle cx="104" cy="22" r="4" fill="#f2c14e"/><text x="93" y="12" text-anchor="middle" font-size="11" fill="#e6f6f8" font-family="sans-serif">4 vs 4</text>'),
+  sv('<g font-family="sans-serif" font-size="11" fill="#e6f6f8"><rect x="6" y="10" width="14" height="40" rx="3" fill="#16425f" stroke="#3fd6c8"/><rect x="26" y="30" width="14" height="20" rx="3" fill="#16425f" stroke="#3fd6c8" stroke-dasharray="3 2"/><text x="23" y="62" text-anchor="middle">air</text><circle cx="66" cy="38" r="8" fill="#f2c14e"/><text x="66" y="62" text-anchor="middle">x2</text><circle cx="98" cy="26" r="9" fill="#f2c14e"/><circle cx="108" cy="40" r="6" fill="#f2c14e"/><text x="98" y="62" text-anchor="middle">most wins</text></g>')
+];
+let helpDlg = null, helpOpener = null;
+function helpDialog() {
+  if (helpDlg) return helpDlg;
+  const step = (i, t, p) => h("li", { class: "hstep" }, h("div", { class: "hart", html: HELP_ART[i] }), h("div", {}, h("b", {}, `${i + 1}. ${t}`), h("p", {}, p)));
+  const k = (...a) => a.map((x) => h("kbd", {}, x));
+  helpDlg = h("dialog", { class: "help", "aria-labelledby": "help-t" },
+    h("div", { class: "row sb" }, h("h2", { id: "help-t" }, "How to play"), h("button", { class: "x", "aria-label": "Close help", onclick: () => helpDlg.close() }, "×")),
+    h("p", { class: "sub" }, "2 to 4 divers, 8 tides. Play humans or bots (easy, normal or hard)."),
+    h("ol", { class: "hsteps" },
+      step(0, "Pick a wreck and spend air", "Everyone chooses in secret: one wreck and how much air to put in. Or rest to breathe and get +2 air."),
+      step(1, "Biggest spender wins it", "The biggest single spender takes the wreck's pearls plus its air pocket. A tie silts it up: nobody gets it and it grows by a pearl."),
+      step(2, "Air is spent for good", "Spent air does not come back, you only get +1 each tide (max 10). The last tide pays double. Most pearls after 8 tides wins, spare air breaks ties.")),
+    h("h3", {}, "Keyboard"),
+    h("dl", { class: "hkeys" },
+      h("dt", {}, ...k("1", "2", "3", "4")), h("dd", {}, "pick a wreck"),
+      h("dt", {}, ...k("↑", "↓")), h("dd", {}, "more or less air (also + and -)"),
+      h("dt", {}, ...k("Enter")), h("dd", {}, "dive"),
+      h("dt", {}, ...k("R")), h("dd", {}, "rest"),
+      h("dt", {}, ...k("?")), h("dd", {}, "open this help"),
+      h("dt", {}, ...k("Esc")), h("dd", {}, "close it")),
+    h("div", { class: "row", style: "justify-content:flex-end;margin-top:14px" }, h("button", { class: "primary", onclick: () => helpDlg.close() }, "Got it")));
+  helpDlg.addEventListener("close", () => { const o = helpOpener; helpOpener = null; (o && o.isConnected ? o : document.querySelector(".qbtn, .linkbtn") || app).focus({ preventScroll: true }); });
+  helpDlg.addEventListener("click", (e) => { if (e.target === helpDlg) helpDlg.close(); });
+  document.body.append(helpDlg);
+  return helpDlg;
+}
+function openHelp(opener) {
+  const d = helpDialog();
+  if (d.open) return;
+  helpOpener = opener || document.activeElement;
+  d.showModal();
+  d.querySelector(".x").focus();
+}
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "?" || e.ctrlKey || e.metaKey || e.altKey) return;
+  const t = e.target;
+  if (t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable)) return;
+  if (helpDlg && helpDlg.open) return;
+  e.preventDefault(); openHelp();
+});
+const helpBtn = () => h("button", { class: "qbtn", "aria-label": "How to play", title: "How to play (?)", onclick: (e) => openHelp(e.currentTarget) }, "?");
+function autoHelp() {
+  try { if (store.get("tg:help")) return; } catch {}
+  store.set("tg:help", "1");
+  openHelp(app);
+}
+
+function matchStats(rounds, players) {
+  const S = Object.fromEntries(players.map((p) => [p.seat, { seat: p.seat, name: p.name, won: 0, pearls: 0, air: 0, ties: 0, best: null }]));
+  let steal = null;
+  for (const r of rounds) {
+    for (const m of r.moves) if (!m.rest && m.wreck != null && S[m.seat]) S[m.seat].air += m.air || 0;
+    for (const w of r.wrecks) {
+      if (w.winner != null && S[w.winner]) {
+        const p = S[w.winner], g = w.gain ?? w.pearls, a = (w.divers.find((d) => d.seat === w.winner) || {}).air || 0;
+        p.won++; p.pearls += g;
+        if (!p.best || g > p.best.gain) p.best = { id: w.id, gain: g };
+        if (!steal || g - a > steal.gain - steal.air) steal = { seat: w.winner, gain: g, air: a };
+      } else if (w.tie) {
+        const top = Math.max(...w.divers.map((d) => d.air));
+        for (const d of w.divers) if (d.air === top && S[d.seat]) S[d.seat].ties++;
+      }
+    }
+  }
+  return { rows: players.map((p) => S[p.seat]), steal };
+}
+
+function statsView(rounds, players) {
+  const { rows, steal } = matchStats(rounds, players);
+  const mostTies = Math.max(...rows.map((r) => r.ties));
+  const sil = mostTies > 0 ? rows.filter((r) => r.ties === mostTies) : [];
+  const nm = (s) => (players.find((p) => p.seat === s) || {}).name;
+  const lines = [
+    steal && steal.gain > 0 ? `Biggest steal: ${nm(steal.seat)} took ${steal.gain} pearl${steal.gain === 1 ? "" : "s"} for ${steal.air} air` : null,
+    sil.length ? `Most silt-outs: ${sil.map((r) => r.name).join(" & ")} (${mostTies})` : null
+  ].filter(Boolean);
+  return h("div", { class: "stats" },
+    h("h2", {}, "Match stats"),
+    lines.length ? h("ul", { class: "hl" }, lines.map((l) => h("li", {}, l))) : null,
+    h("div", { class: "tw" }, h("table", { class: "stand st2" },
+      h("thead", {}, h("tr", {}, ["Diver", "Won", "Pearls", "Air", "Ties", "Best dive"].map((c, i) => h("th", { scope: "col" }, c)))),
+      h("tbody", {}, rows.map((r) => h("tr", {}, h("th", { scope: "row" }, r.name), h("td", {}, r.won), h("td", {}, r.pearls), h("td", {}, r.air), h("td", {}, r.ties), h("td", {}, r.best ? `#${r.best.id} for ${r.best.gain}` : "-")))))));
+}
+
 function home() {
   const nameIn = h("input", { id: "nm", maxlength: 20, placeholder: "Your name", value: myName(), autocomplete: "nickname", "aria-label": "Your name" });
   const err = h("div", { class: "err", role: "alert" });
@@ -117,7 +207,7 @@ function home() {
   const seats = h("select", { id: "seats", "aria-label": "Seats" }, [2, 3, 4].map((n) => h("option", { value: n }, n + " players")));
   const bots = h("select", { id: "bots", "aria-label": "Bots now" }, [0, 1, 2, 3].map((n) => h("option", { value: n }, n === 0 ? "No bots yet" : n + (n === 1 ? " bot" : " bots"))));
   const secs = h("select", { id: "secs", "aria-label": "Seconds per tide" }, [20, 45, 90].map((n) => h("option", { value: n, selected: n === 45 }, n + " s per tide")));
-  const lvl = h("select", { id: "lvl", "aria-label": "Bot level" }, [["normal", "Normal bots"], ["easy", "Easy bots"]].map(([v, t]) => h("option", { value: v }, t)));
+  const lvl = h("select", { id: "lvl", "aria-label": "Bot level" }, [["normal", "Normal bots"], ["easy", "Easy bots"], ["hard", "Hard bots"]].map(([v, t]) => h("option", { value: v }, t)));
   const codeIn = h("input", { class: "code", maxlength: 5, placeholder: "CODE", "aria-label": "Match code", autocomplete: "off" });
   const lobbies = h("ul", { class: "list" }, h("li", { class: "muted" }, "Looking for open tables..."));
   const live = h("ul", { class: "list" });
@@ -148,7 +238,7 @@ function home() {
           h("div", { class: "row" }, h("div", { style: "flex:1;min-width:120px" }, codeIn), h("button", { onclick: join }, "Join")),
           h("h2", { style: "margin-top:18px" }, "Open tables"), lobbies,
           h("h2", { style: "margin-top:18px" }, "Watch live"), live)),
-      h("p", { class: "muted center" }, "Agents welcome: ", h("a", { href: "/docs" }, "HTTP/JSON API docs")));
+      h("p", { class: "muted center" }, h("button", { class: "linkbtn", onclick: (e) => openHelp(e.currentTarget) }, "How to play"), " · Agents welcome: ", h("a", { href: "/docs" }, "HTTP/JSON API docs")));
     codeIn.addEventListener("keydown", (e) => { if (e.key === "Enter") join(); });
     nameIn.addEventListener("keydown", (e) => { if (e.key === "Enter") create(); });
   });
@@ -258,6 +348,7 @@ function match(code) {
         ver = s.version;
         const first = !st;
         st = s;
+        if (first && s.you && s.status !== "finished") autoHelp();
         recon = false;
         if (!s.you && token) { store.del("tg:t:" + code); token = null; }
         if (s.lastReveal && s.lastReveal.tide !== logTide || (s.status === "finished" && first)) {
@@ -375,12 +466,13 @@ function match(code) {
   function gameView() {
     const finished = st.status === "finished";
     const out = [];
-    out.push(h("section", { class: "card" }, h("div", { class: "hud" }, h("div", {}, finished ? h("b", {}, "Match over") : h("b", {}, `Tide ${curTide()} / ${st.tides}`), " ", !finished && st.tide === st.tides ? h("span", { class: "final" }, "Final tide: pearls count double") : null, " ", h("span", { class: "muted" }, "Code " + code)), finished ? null : h("div", { id: "tleft", class: "muted" }, "")), finished ? null : h("div", { class: "timer", role: "presentation" }, h("i"))));
+    out.push(h("section", { class: "card" }, h("div", { class: "hud" }, h("div", {}, finished ? h("b", {}, "Match over") : h("b", {}, `Tide ${curTide()} / ${st.tides}`), " ", !finished && st.tide === st.tides ? h("span", { class: "final" }, "Final tide: pearls count double") : null, " ", h("span", { class: "muted" }, "Code " + code)), h("div", { class: "row", style: "gap:8px" }, finished ? null : h("div", { id: "tleft", class: "muted" }, ""), helpBtn())), finished ? null : h("div", { class: "timer", role: "presentation" }, h("i"))));
     if (finished) {
       const wn = (st.winners || []).map((s) => st.players[s].name);
-      out.push(h("section", { class: "card center" }, h("h1", {}, wn.length ? (wn.length > 1 ? "Shared victory: " : "Winner: ") + wn.join(" & ") : "No winner"), standings(st),
+      out.push(h("section", { class: "card center" }, h("h1", {}, wn.length ? (wn.length > 1 ? "Shared victory: " : "Winner: ") + wn.join(" & ") : "No winner"), standings(st), logRounds.length ? statsView(logRounds, st.players) : null,
         h("div", { class: "row", style: "justify-content:center;margin-top:14px" },
-          st.you ? h("button", { class: "primary", onclick: playAgain }, "Play again") : null, h("a", { class: "btn", href: "/replay/" + code }, "Watch replay"), h("a", { class: "btn", href: "/" }, "Home"))));
+          st.you ? h("button", { class: "primary", onclick: playAgain }, "Play again") : null, h("a", { class: "btn", href: "/replay/" + code }, "Watch replay"), h("button", { class: "btn", "data-k": "copy", onclick: copyLink }, copied ? "Copied!" : "Copy replay link"), h("a", { class: "btn", href: "/" }, "Home")),
+        showLink ? h("input", { class: "rlink", readonly: true, value: replayUrl(), "aria-label": "Replay link", onfocus: (e) => e.target.select() }) : null));
     }
     const pausing = !finished && isPausing();
     let rev = null;
@@ -402,6 +494,15 @@ function match(code) {
     if (rev && !pausing && !finished) out.push(rev);
     if (logRounds.length) out.push(h("section", { class: "card" }, h("h2", {}, "Match log"), h("ol", { class: "log", reversed: true }, [...logRounds].reverse().map((r) => h("li", {}, roundLine(r, names()))))));
     return out;
+  }
+
+  const replayUrl = () => location.origin + "/replay/" + code;
+  let copied = false, showLink = false, copyT = 0;
+  async function copyLink() {
+    try { await navigator.clipboard.writeText(replayUrl()); copied = true; showLink = false; clearTimeout(copyT); copyT = setTimeout(() => { copied = false; render(); }, 2000); say("Replay link copied"); }
+    catch { showLink = true; }
+    render();
+    if (showLink) { const i = root.querySelector(".rlink"); if (i) { i.focus(); i.select(); } }
   }
 
   async function playAgain() {
