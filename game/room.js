@@ -24,14 +24,16 @@ function parseMove(body, legal) {
   const fail = (msg) => {
     throw new ApiError(400, msg, { legal: legal() });
   };
+  const odd = Object.keys(body).filter((k) => !["wreck", "air", "rest", "token"].includes(k));
   const rest = body.rest === false ? undefined : body.rest;
-  if (rest === undefined && !has("wreck") && !has("air")) fail("empty move: " + MOVE_SHAPE);
+  if (rest === undefined && !has("wreck") && !has("air")) fail((odd.length ? `unknown field "${odd[0]}": ` : "empty move: ") + MOVE_SHAPE);
   if (rest !== undefined && rest !== null) {
     if (rest !== true) fail('rest must be true or left out: ' + MOVE_SHAPE);
     if (has("wreck") || has("air")) fail("send either rest or wreck + air, not both");
     return { rest: true };
   }
-  return { wreck: body.wreck, air: body.air };
+  const num = (v) => (typeof v === "string" && /^\d{1,3}$/.test(v) ? Number(v) : v);
+  return { wreck: num(body.wreck), air: num(body.air) };
 }
 
 export class ApiError extends Error {
@@ -339,7 +341,7 @@ export class MatchRoom {
   }
 
   requireLobby() {
-    if (this.d.status !== "lobby") throw new ApiError(400, "this match has already started");
+    if (this.d.status !== "lobby") throw new ApiError(400, "this match has already started (it starts by itself once every seat is filled)");
   }
 
   waitForChange(version, ms) {
@@ -451,7 +453,7 @@ export class MatchRoom {
     if (sub === "move") {
       const seat = this.seatOf(token);
       if (seat === null) throw new ApiError(401, NO_TOKEN);
-      if (d.status !== "playing") throw new ApiError(400, d.status === "lobby" ? "the match has not started yet" : "the match is over");
+      if (d.status !== "playing") throw new ApiError(400, d.status === "lobby" ? "the match has not started yet: wait until status is \"playing\" (the host starts it, or it starts when every seat is filled)" : "the match is over");
       const move = parseMove(body, () => this.legalFor(seat));
       const accepted = this.submitMove(seat, move);
       return { status: 200, json: { ok: true, tide: d.game.tide, move: accepted, version: d.version } };

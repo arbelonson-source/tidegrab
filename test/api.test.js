@@ -94,6 +94,10 @@ test("move shapes: rest:false dives, mixed or empty moves explain themselves", a
   assert.match(mixed.json.error, /not both/);
   const odd = await call(`/api/matches/${json.code}/move`, { rest: "yes" }, json.token);
   assert.match(odd.json.error, /rest must be true/);
+  const unknown = await call(`/api/matches/${json.code}/move`, { wreckId: id, bid: 1 }, json.token);
+  assert.match(unknown.json.error, /unknown field "wreckId"/);
+  const strings = await call(`/api/matches/${json.code}/move`, { wreck: String(id), air: "2" }, json.token);
+  assert.deepEqual(strings.json.move, { wreck: id, air: 2 });
   const ok = await call(`/api/matches/${json.code}/move`, { rest: false, wreck: id, air: 1 }, json.token);
   assert.equal(ok.status, 200);
   assert.deepEqual(ok.json.move, { wreck: id, air: 1 });
