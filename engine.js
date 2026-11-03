@@ -10,9 +10,15 @@ export const RULES = Object.freeze({
   growth: 1,
   maxPearls: 12,
   airPocket: 3,
+  finalPayout: 2,
   minPlayers: 2,
   maxPlayers: 4,
 });
+
+// The last tide pays every pearl twice, so a lead is never safe until the end.
+export function payout(g) {
+  return g.tide >= g.tides ? RULES.finalPayout : 1;
+}
 
 export function wreckCount(players) {
   return Math.max(2, players - 1);
@@ -90,6 +96,7 @@ export function resolveTide(g, moves) {
     else p.air -= m.air;
   }
 
+  const mult = payout(g);
   const outcome = [];
   const kept = [];
   for (const w of g.wrecks) {
@@ -98,9 +105,10 @@ export function resolveTide(g, moves) {
     const top = divers.length ? divers[0].air : 0;
     const tie = divers.length > 1 && divers[1].air === top;
     const winner = divers.length && !tie ? divers[0].seat : null;
-    outcome.push({ id: w.id, pearls: w.pearls, air: w.air, divers, winner, tie });
+    const gain = winner !== null ? w.pearls * mult : 0;
+    outcome.push({ id: w.id, pearls: w.pearls, air: w.air, divers, winner, tie, gain });
     if (winner !== null) {
-      g.players[winner].pearls += w.pearls;
+      g.players[winner].pearls += gain;
       g.players[winner].air += w.air;
     } else {
       kept.push({ ...w, pearls: Math.min(RULES.maxPearls, w.pearls + RULES.growth), age: w.age + 1 });
@@ -112,6 +120,7 @@ export function resolveTide(g, moves) {
   g.wrecks = kept;
   const event = {
     tide: g.tide,
+    payout: mult,
     moves: taken,
     wrecks: outcome,
     standings: g.players.map((p) => ({ seat: p.seat, air: p.air, pearls: p.pearls })),

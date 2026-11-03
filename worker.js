@@ -51,17 +51,18 @@ function makeStore(env) {
     async list() {
       return (await call(lobby, "/list")).json;
     },
-    async create(params) {
-      const n = await call(lobby, "/new");
+    async create(params, ip) {
+      const n = await call(lobby, "/new", { ip });
       if (n.status !== 200) throw new ApiError(n.status, n.json.error);
       const code = n.json.code;
       const made = await call(env.MATCH.get(env.MATCH.idFromName(code)), "/init", { code, params });
+      if (made.status !== 200) throw new ApiError(503, "could not open the match, try again");
       return { code, ...made.json };
     },
     async match(code) {
       if (!/^[A-Z0-9]{5}$/.test(code)) return null;
       const stub = env.MATCH.get(env.MATCH.idFromName(code));
-      return { handle: (method, sub, body, token, query, origin) => call(stub, "/call", { method, sub, body, token, query, origin }) };
+      return { handle: (method, sub, body, token, query, origin) => call(stub, "/call", { code, method, sub, body, token, query, origin }) };
     },
   };
 }
@@ -73,10 +74,11 @@ export default {
       if (request.method === "OPTIONS") return reply(204);
       if (url.pathname === "/healthz") return reply(200, { ok: true });
       if (!url.pathname.startsWith("/api/")) return env.ASSETS.fetch(request);
-      rateLimit(request.headers.get("cf-connecting-ip") || "?");
+      const ip = request.headers.get("cf-connecting-ip") || null;
+      rateLimit(ip || "?");
       const body = await readBody(request);
       const h = request.headers.get("authorization");
-      const token = h && /^bearer /i.test(h) ? h.slice(7).trim() : body.token || url.searchParams.get("token") || null;
+      const token = h && /^bearer /i.test(h) ? h.slice(7).trim() : body.token || null;
       const out = await route(makeStore(env), {
         method: request.method,
         parts: url.pathname.split("/").slice(2).filter(Boolean),
@@ -84,6 +86,7 @@ export default {
         token,
         query: Object.fromEntries(url.searchParams),
         origin: url.origin,
+        ip,
       });
       return reply(out.status, out.json);
     } catch (e) {
@@ -111,8 +114,13 @@ export class MatchDO {
     return new MatchRoom(data, {
       now: () => Date.now(),
       save: (snap) => void ctx.storage.put("d", snap),
-      wake: (at) => void (at == null ? ctx.storage.deleteAlarm() : ctx.storage.setAlarm(Math.max(at, Date.now() + 1))),
-      notify: (summary) => void call(lobbyStub(), "/update", summary).catch(() => {}),
+      wake: (at) => void ctx.storage.setAlarm(at == null ? this.cleanupAt() : Math.max(at, Date.now() + 1)),
+      notify: (summary) => {
+        const key = `${summary.status}|${summary.filled}|${summary.tide}`;
+        if (key === this.sent) return;
+        this.sent = key;
+        void call(lobbyStub(), "/update", summary).catch(() => {});
+      },
     });
   }
 
@@ -132,9 +140,21 @@ export class MatchDO {
     return Response.json(out.json, { status: out.status });
   }
 
+  // Finished matches stay a day for replays; abandoned lobbies a few minutes.
+  cleanupAt() {
+    const status = this.room?.d.status;
+    return Date.now() + (status === "finished" ? 86400000 : 600000);
+  }
+
   async alarm() {
     await this.ready;
-    this.room?.onWake();
+    const status = this.room?.d.status;
+    if (!this.room || status === "finished" || status === "expired") {
+      this.room = null;
+      await this.ctx.storage.deleteAll();
+      return;
+    }
+    this.room.onWake();
   }
 }
 
@@ -151,12 +171,15 @@ export class LobbyDO {
     await this.ready;
     const path = new URL(request.url).pathname;
     const p = request.method === "POST" ? await request.json() : {};
-    if (path === "/list") return Response.json(this.reg.list());
+    if (path === "/list") {
+      if (this.reg.prune()) await this.ctx.storage.put("r", this.reg.toJSON());
+      return Response.json(this.reg.list());
+    }
     if (path === "/new") {
-      const full = this.reg.checkCapacity();
-      if (full) return Response.json({ error: full }, { status: 503 });
+      const full = this.reg.checkCapacity(p.ip);
+      if (full) return Response.json({ error: full }, { status: full.startsWith("you already") ? 429 : 503 });
       const code = this.reg.newCode();
-      this.reg.reserve(code);
+      this.reg.reserve(code, p.ip);
       await this.ctx.storage.put("r", this.reg.toJSON());
       return Response.json({ code });
     }

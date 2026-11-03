@@ -9,7 +9,7 @@
     "test": "node --test test/",
     "sim": "node sim.js",
     "dev:worker": "wrangler dev",
-    "sync-readme": "cp README.md public/README.md"
+    "sync-readme": "node scripts/build-docs.mjs"
   },
   "engines": { "node": ">=18" },
   "devDependencies": { "wrangler": "^4.0.0" }

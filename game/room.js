@@ -2,9 +2,9 @@ import { RULES, createGame, checkMove, normalizeMove, resolveTide } from "../eng
 import { chooseMove } from "../bots/brain.js";
 
 const BOT_NAMES = ["Coral", "Kelp", "Manta", "Brine", "Nacre", "Squall", "Abyss", "Tern"];
-const LOBBY_TTL = 3600000;
+const LOBBY_TTL = 900000;
 const MAX_WAITERS = 400;
-const NO_TOKEN = "missing or unknown token (send it as 'Authorization: Bearer <token>' or a 'token' field)";
+const NO_TOKEN = "missing or unknown token for this match (send it as 'Authorization: Bearer <token>' or a 'token' field)";
 let waiterTotal = 0;
 
 export const RULES_TEXT =
@@ -13,8 +13,26 @@ export const RULES_TEXT =
   "spending at least 1 Air on it, or rests to gain 2 Air. When everyone has chosen, the choices are revealed: at each " +
   "wreck the single diver who spent the most Air takes its pearls and air pocket, but if two or more divers tie for " +
   "the most, the silt clouds the water and nobody takes it. All Air spent is gone, even if you lose. Unclaimed wrecks " +
-  "stay and grow by 1 pearl, and every diver regains 1 Air each tide (up to 10). After eight tides the diver with " +
-  "the most pearls wins; ties go to whoever has more Air left.";
+  "stay and grow by 1 pearl, and every diver regains 1 Air each tide (up to 10). The eighth and final tide pays " +
+  "double: every pearl won on it counts twice. After it, the diver with the most pearls wins; ties go to whoever " +
+  "has more Air left. A diver who does not move before the timer runs out rests.";
+
+const MOVE_SHAPE = 'send {"wreck": <id>, "air": <n>} or {"rest": true}';
+
+function parseMove(body, legal) {
+  const has = (k) => body[k] !== undefined && body[k] !== null;
+  const fail = (msg) => {
+    throw new ApiError(400, msg, { legal: legal() });
+  };
+  const rest = body.rest === false ? undefined : body.rest;
+  if (rest === undefined && !has("wreck") && !has("air")) fail("empty move: " + MOVE_SHAPE);
+  if (rest !== undefined && rest !== null) {
+    if (rest !== true) fail('rest must be true or left out: ' + MOVE_SHAPE);
+    if (has("wreck") || has("air")) fail("send either rest or wreck + air, not both");
+    return { rest: true };
+  }
+  return { wreck: body.wreck, air: body.air };
+}
 
 export class ApiError extends Error {
   constructor(status, message, extra = {}) {
@@ -254,7 +272,7 @@ export class MatchRoom {
     const g = d.game;
     const before = { wrecks: g.wrecks.map((w) => ({ ...w })), players: g.players.map((p) => ({ seat: p.seat, air: p.air, pearls: p.pearls })) };
     const ev = resolveTide(g, g.players.map((p) => d.moves[p.seat]));
-    d.rounds.push({ tide: ev.tide, before, moves: ev.moves, results: ev.wrecks, standings: ev.standings });
+    d.rounds.push({ tide: ev.tide, payout: ev.payout, last: g.finished, before, moves: ev.moves, results: ev.wrecks, standings: ev.standings });
     if (g.finished) {
       d.status = "finished";
       d.finishedAt = this.hooks.now();
@@ -360,10 +378,13 @@ export class MatchRoom {
       let seat = null;
       if (token) {
         seat = this.seatOf(token);
-        if (seat === null) throw new ApiError(401, "unknown token for this match");
+        if (seat === null) throw new ApiError(401, NO_TOKEN);
       }
       const wait = query.wait;
-      if (wait !== undefined && wait !== null && d.version <= Number(wait) && d.status !== "finished") await this.waitForChange(Number(wait), 25000);
+      if (wait !== undefined && wait !== null && wait !== "") {
+        if (!/^\d{1,9}$/.test(String(wait))) throw new ApiError(400, "wait must be the version number you last saw, e.g. ?wait=12");
+        if (d.version <= Number(wait) && d.status !== "finished") await this.waitForChange(Number(wait), 25000);
+      }
       return { status: 200, json: this.publicState(seat) };
     }
     if (sub === "log" && method === "GET") {
@@ -372,7 +393,7 @@ export class MatchRoom {
         json: {
           code: d.code,
           status: d.status,
-          seed: d.seed,
+          seed: d.status === "finished" ? d.seed : null,
           settings: d.settings,
           rules: RULES,
           names: d.seats.map((s) => s && s.name),
@@ -384,6 +405,7 @@ export class MatchRoom {
     }
     if (method !== "POST") throw new ApiError(405, "use POST");
     if (sub === "join") {
+      if (d.seats.every(Boolean)) throw new ApiError(400, d.status === "lobby" ? "the lobby is full" : "the match is full and already running, watch it instead");
       this.requireLobby();
       const seat = this.addSeat(cleanName(body.name, "Diver"), "human");
       if (d.seats.every(Boolean)) this.startMatch();
@@ -413,7 +435,7 @@ export class MatchRoom {
       const seat = this.seatOf(token);
       if (seat === null) throw new ApiError(401, NO_TOKEN);
       if (d.status !== "playing") throw new ApiError(400, d.status === "lobby" ? "the match has not started yet" : "the match is over");
-      const move = body.rest === true ? { rest: true } : { wreck: body.wreck, air: body.air };
+      const move = parseMove(body, () => this.legalFor(seat));
       const accepted = this.submitMove(seat, move);
       return { status: 200, json: { ok: true, tide: d.game.tide, move: accepted, version: d.version } };
     }

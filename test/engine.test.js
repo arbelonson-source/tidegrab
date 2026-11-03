@@ -85,3 +85,14 @@ test("tie on pearls is broken by remaining air", () => {
   g.players[1].air = 4;
   assert.deepEqual(winners(g), [0, 1]);
 });
+
+test("the final tide pays double", () => {
+  const g = createGame(["a", "b"], 5);
+  while (g.tide < g.tides) resolveTide(g, [{ rest: true }, { rest: true }]);
+  const w = g.wrecks[0];
+  const before = g.players[0].pearls;
+  const ev = resolveTide(g, [dive(w.id, 1), { rest: true }]);
+  assert.equal(ev.payout, RULES.finalPayout);
+  assert.equal(g.players[0].pearls - before, w.pearls * RULES.finalPayout);
+  assert.equal(g.finished, true);
+});

@@ -104,11 +104,11 @@ export function startServer(opts = {}) {
 
   const store = {
     list: () => registry.list(),
-    create(params) {
-      const full = registry.checkCapacity();
-      if (full) throw new ApiError(503, full);
+    create(params, ip) {
+      const full = registry.checkCapacity(ip);
+      if (full) throw new ApiError(full.startsWith("you already") ? 429 : 503, full);
       const code = registry.newCode();
-      registry.reserve(code);
+      registry.reserve(code, ip);
       const hooks = makeHooks(code);
       const { room, seat, token } = MatchRoom.create(code, params, hooks, { fast });
       rooms.set(code, room);
@@ -197,7 +197,7 @@ export function startServer(opts = {}) {
   async function api(req, res, url) {
     const body = req.method === "POST" ? await readBody(req) : {};
     const h = req.headers.authorization;
-    const token = h && /^bearer /i.test(h) ? h.slice(7).trim() : body.token || url.searchParams.get("token") || null;
+    const token = h && /^bearer /i.test(h) ? h.slice(7).trim() : body.token || null;
     const proto = req.headers["x-forwarded-proto"] || "http";
     const out = await route(store, {
       method: req.method,
@@ -206,6 +206,7 @@ export function startServer(opts = {}) {
       token,
       query: Object.fromEntries(url.searchParams),
       origin: `${proto}://${req.headers.host}`,
+      ip: req.socket.remoteAddress || null,
     });
     send(res, out.status, out.json);
   }

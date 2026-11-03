@@ -76,3 +76,48 @@ test("rules and health endpoints", async () => {
   assert.equal((await call("/healthz")).json.ok, true);
   assert.equal((await call("/api/rules")).json.tides, 8);
 });
+
+test("move shapes: rest:false dives, mixed or empty moves explain themselves", async () => {
+  const { json } = await call("/api/matches", { name: "T", seats: 2, bots: 1 });
+  let st;
+  for (let i = 0; i < 100; i++) {
+    st = (await call(`/api/matches/${json.code}?wait=0`, null, json.token)).json;
+    if (st.status === "playing" && !(st.pauseUntil > st.serverTime)) break;
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  const id = st.wrecks[0].id;
+  const empty = await call(`/api/matches/${json.code}/move`, {}, json.token);
+  assert.equal(empty.status, 400);
+  assert.match(empty.json.error, /empty move/);
+  assert.ok(empty.json.legal);
+  const mixed = await call(`/api/matches/${json.code}/move`, { rest: true, wreck: id, air: 1 }, json.token);
+  assert.match(mixed.json.error, /not both/);
+  const odd = await call(`/api/matches/${json.code}/move`, { rest: "yes" }, json.token);
+  assert.match(odd.json.error, /rest must be true/);
+  const ok = await call(`/api/matches/${json.code}/move`, { rest: false, wreck: id, air: 1 }, json.token);
+  assert.equal(ok.status, 200);
+  assert.deepEqual(ok.json.move, { wreck: id, air: 1 });
+  assert.equal((await call(`/api/matches/${json.code}?wait=abc`, null, json.token)).status, 400);
+  assert.equal((await call(`/api/matches/${json.code}/log`)).json.seed, null);
+});
+
+test("joining a full running match says so", async () => {
+  const { json } = await call("/api/matches", { name: "T", seats: 2, bots: 1 });
+  const j = await call(`/api/matches/${json.code}/join`, { name: "Late" });
+  assert.equal(j.status, 400);
+  assert.match(j.json.error, /full/);
+  const nf = await call("/api/matches/QQQQQ");
+  assert.match(nf.json.error, /QQQQQ/);
+});
+
+test("one address can only hold a few open lobbies", async () => {
+  const codes = [];
+  let last;
+  for (let i = 0; i < 8; i++) {
+    last = await call("/api/matches", { name: "Spam", seats: 4 });
+    if (last.status !== 200) break;
+    codes.push(last.json.code);
+  }
+  assert.equal(last.status, 429);
+  assert.ok(codes.length <= 5);
+});

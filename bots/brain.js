@@ -1,4 +1,4 @@
-import { RULES } from "../engine.js";
+import { RULES, payout } from "../engine.js";
 
 const pick = (arr, rnd) => arr[Math.floor(rnd() * arr.length)];
 
@@ -25,8 +25,8 @@ function airValue(g) {
   return Math.min(1.0, 0.12 + 0.11 * left);
 }
 
-function wreckValue(w, lam) {
-  return w.pearls + w.air * lam;
+function wreckValue(w, lam, mult = 1) {
+  return w.pearls * mult + w.air * lam;
 }
 
 // Rough model of a rival: chance of resting, a pull towards juicy wrecks, and
@@ -34,7 +34,7 @@ function wreckValue(w, lam) {
 function rivalModel(g, rival, lam) {
   const A = rival.air;
   const restP = A <= 1 ? 0.85 : A <= 3 ? 0.4 : 0.15;
-  const weights = g.wrecks.map((w) => Math.pow(wreckValue(w, lam) + 1, 1.6));
+  const weights = g.wrecks.map((w) => Math.pow(wreckValue(w, lam, payout(g)) + 1, 1.6));
   const sum = weights.reduce((a, b) => a + b, 0);
   const hi = Math.max(1, Math.min(A, Math.ceil(A * 0.9) + 1));
   return { restP, hi, wreckP: weights.map((x) => ((1 - restP) * x) / sum) };
@@ -51,7 +51,7 @@ function normalMove(g, seat, rnd) {
   const models = g.players.map((p, i) => (i === seat ? null : rivalModel(g, p, lam)));
   const options = [{ move: { rest: true }, ev: 2 * lam * 1.3 }];
   g.wrecks.forEach((w, wi) => {
-    const prize = wreckValue(w, lam);
+    const prize = wreckValue(w, lam, payout(g));
     for (let b = 1; b <= me.air; b++) {
       let pWin = 1;
       for (const m of models) {
