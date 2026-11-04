@@ -35,7 +35,7 @@ export function render(md) {
     }
     closeTable();
     const h = /^(#{1,4}) (.*)/.exec(line);
-    if (h) { flush(); out.push(`<h${h[1].length}>${inline(h[2])}</h${h[1].length}>`); continue; }
+    if (h) { flush(); const id = h[2].toLowerCase().replace(/[^a-z0-9 -]/g, "").trim().replace(/ +/g, "-"); out.push(`<h${h[1].length} id="${id}">${inline(h[2])}</h${h[1].length}>`); continue; }
     const li = /^[-*] (.*)/.exec(line);
     if (li) { flushPara(); if (!list) out.push("<ul>"); list = true; out.push("<li>" + inline(li[1]) + "</li>"); continue; }
     if (!line.trim()) { flushPara(); closeList(); continue; }

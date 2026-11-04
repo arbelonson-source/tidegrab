@@ -4,7 +4,16 @@ A small turn-based strategy game of secret bids for 2 to 4 players, humans in th
 
 **Play now: https://tidegrab.arbelonski.workers.dev** (no install, no login). Source: https://github.com/arbelonson-source/tidegrab
 
-## Rules
+## Rules in 30 seconds
+
+- Two to four divers, eight tides. Most pearls at the end wins.
+- Each tide, in secret, either dive to one wreck and spend some of your Air on it, or rest to gain 2 Air.
+- At each wreck the diver who spent the most Air takes its pearls. A tie for the most means nobody does, and spent Air is gone either way.
+- Wrecks nobody claims grow, and the last tide pays double, so saving Air for the right moment matters.
+
+**Writing a bot?** Three calls are enough: create a match, long-poll its state, send a move. See [Agent API](#agent-api) below, or run `python3 bots/sample_bot.py` (or `node bots/sample_bot.mjs`) to watch one play a full match.
+
+## Full rules
 
 Two to four divers race through eight tides. Each tide, wrecks lie on the seabed (one fewer than the number of divers, at least two), each holding pearls (the points) and sometimes an air pocket (+3 Air for whoever claims it). In secret, every diver either dives to one wreck, spending at least 1 Air on it, or rests to gain 2 Air. When everyone has chosen, the choices are revealed: at each wreck the single diver who spent the most Air takes its pearls and air pocket, but if two or more divers tie for the most, nobody takes it. All Air spent on a dive is gone, even if you lose. Wrecks nobody claimed stay and grow by 1 pearl. After every tide each diver regains 1 Air (maximum 10). You start with 5 Air. The eighth and final tide pays double: every pearl won on it counts twice. After it, the diver with the most pearls wins; ties go to the diver with more Air left. If you do not move before the timer runs out, you rest.
 
@@ -54,6 +63,37 @@ curl -s -X POST $BASE/api/matches/CODE/move -H "Authorization: Bearer TOKEN" -d 
 **Tokens.** Every human seat gets its own token from create or join. Send it as `Authorization: Bearer <token>` (a `token` field in a JSON body also works). Bots need no token. Match codes are 5 letters and digits and are not case sensitive.
 
 **State fields.** `code`, `status` (`lobby`, `playing`, `finished`), `version` (goes up on every change, including other players locking in, so after a move keep long-polling until `tide` changes), `settings` (`seats, turnSeconds, botLevel`), `tide` (1-8) and `tides` (8), `serverTime`, `deadline` and `pauseUntil` (ms; after each tide there is a 4 s reveal pause and the turn timer starts when it ends, but moves are accepted during the pause too), `secondsLeft`, `host` (always seat 0), `seats` (a list of `{seat, name, kind}`, or `null` for an empty seat), `players` (`seat, name, kind, air, pearls, submitted`), `wrecks` (`id, pearls, air, age`: `air` is the air pocket, `age` is how many tides it went unclaimed), `lastReveal` (the previous tide with everyone's choices and per-wreck `divers, winner, tie, gain`), `winners` (seats, when finished), `rematch` (the new match's code once someone asked for a rematch, else `null`), `rules`, and with a token `you` (`seat, name, isHost, move`, and `legal: {rest, wrecks, minAir, maxAir}` only while playing; `wrecks` is the list of wreck ids you may dive to). Wreck ids keep increasing during a match, so always read them from `wrecks`.
+
+**Example state** (3 seats, start of tide 2, seen by seat 0 with its token; `rules` left out). In tide 1 seat 0 spent 3 Air on wreck 1 and beat seat 2's 1 Air, so it took 5 pearls; nobody dived to wreck 2, so it stays and grows to 4 pearls, and a new wreck 3 surfaced.
+
+```json
+{
+  "code": "7RDYQ", "status": "playing", "version": 5, "tide": 2, "tides": 8,
+  "settings": {"seats": 3, "turnSeconds": 45, "botLevel": "normal"},
+  "serverTime": 1793750422000, "pauseUntil": 1793750426000, "deadline": 1793750471000, "secondsLeft": 49,
+  "host": 0,
+  "seats": [{"seat": 0, "name": "me", "kind": "human"}, {"seat": 1, "name": "Bot Kelp", "kind": "bot"}, {"seat": 2, "name": "Bot Tern", "kind": "bot"}],
+  "players": [
+    {"seat": 0, "name": "me", "kind": "human", "air": 3, "pearls": 5, "submitted": false},
+    {"seat": 1, "name": "Bot Kelp", "kind": "bot", "air": 8, "pearls": 0, "submitted": true},
+    {"seat": 2, "name": "Bot Tern", "kind": "bot", "air": 5, "pearls": 0, "submitted": false}
+  ],
+  "wrecks": [{"id": 2, "pearls": 4, "air": 0, "age": 1}, {"id": 3, "pearls": 7, "air": 0, "age": 0}],
+  "lastReveal": {
+    "tide": 1, "payout": 1,
+    "moves": [{"seat": 0, "wreck": 1, "air": 3}, {"seat": 1, "rest": true}, {"seat": 2, "wreck": 1, "air": 1}],
+    "wrecks": [
+      {"id": 1, "pearls": 5, "air": 0, "divers": [{"seat": 0, "air": 3}, {"seat": 2, "air": 1}], "winner": 0, "tie": false, "gain": 5},
+      {"id": 2, "pearls": 3, "air": 0, "divers": [], "winner": null, "tie": false, "gain": 0}
+    ],
+    "standings": [{"seat": 0, "air": 3, "pearls": 5}, {"seat": 1, "air": 8, "pearls": 0}, {"seat": 2, "air": 5, "pearls": 0}]
+  },
+  "winners": null, "rematch": null,
+  "you": {"seat": 0, "name": "me", "isHost": true, "move": null, "legal": {"rest": true, "wrecks": [2, 3], "minAir": 1, "maxAir": 3}}
+}
+```
+
+Here `you.move` is `null` and `status` is `playing`, so it is your turn: send `{"wreck": 3, "air": 2}` (any id from `legal.wrecks`, Air from `minAir` to `maxAir`) or `{"rest": true}`. `players[].submitted` shows who has already locked in, never what they chose. Then long-poll with `?wait=5`; the reply comes back as soon as anything changes, and once `tide` is 3 the outcome of tide 2 is in `lastReveal`.
 
 **Errors.** Errors are `{"error": "..."}` with an HTTP status: 400 for a bad request or an illegal move (with the `legal` options attached), 401 for a missing or wrong token, 403 for host-only actions, 404 for an unknown match, 405 for the wrong method, 413 for a body over 16 KB, 429 for more than 300 requests in 10 s from one address or more than 5 open lobbies or 12 running matches from one address, and 503 when the server is full or too many long-polls are waiting (retry without `wait`). Names are trimmed to 20 characters. Wreck ids and air sent as numeric strings (`"2"`) are accepted, and an unknown field such as `bid` is named in the error.
 

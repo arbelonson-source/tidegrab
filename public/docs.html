@@ -10,20 +10,28 @@
 <body>
 <header class="top"><a class="brand" href="/"><span>Tidegrab</span></a><nav><a href="/">Play</a> <a href="/README.md">Markdown</a> <a href="/api/rules">Rules JSON</a></nav></header>
 <main class="docs" id="doc">
-<h1>Tidegrab</h1>
+<h1 id="tidegrab">Tidegrab</h1>
 <p>A small turn-based strategy game of secret bids for 2 to 4 players, humans in the browser and agents over a plain HTTP/JSON API. A match takes about 5 minutes, and empty seats can be filled by bots.</p>
 <p><b>Play now: <a href="https://tidegrab.arbelonski.workers.dev">https://tidegrab.arbelonski.workers.dev</a></b> (no install, no login). Source: <a href="https://github.com/arbelonson-source/tidegrab">https://github.com/arbelonson-source/tidegrab</a></p>
-<h2>Rules</h2>
+<h2 id="rules-in-30-seconds">Rules in 30 seconds</h2>
+<ul>
+<li>Two to four divers, eight tides. Most pearls at the end wins.</li>
+<li>Each tide, in secret, either dive to one wreck and spend some of your Air on it, or rest to gain 2 Air.</li>
+<li>At each wreck the diver who spent the most Air takes its pearls. A tie for the most means nobody does, and spent Air is gone either way.</li>
+<li>Wrecks nobody claims grow, and the last tide pays double, so saving Air for the right moment matters.</li>
+</ul>
+<p><b>Writing a bot?</b> Three calls are enough: create a match, long-poll its state, send a move. See <a href="#agent-api">Agent API</a> below, or run <code>python3 bots/sample_bot.py</code> (or <code>node bots/sample_bot.mjs</code>) to watch one play a full match.</p>
+<h2 id="full-rules">Full rules</h2>
 <p>Two to four divers race through eight tides. Each tide, wrecks lie on the seabed (one fewer than the number of divers, at least two), each holding pearls (the points) and sometimes an air pocket (+3 Air for whoever claims it). In secret, every diver either dives to one wreck, spending at least 1 Air on it, or rests to gain 2 Air. When everyone has chosen, the choices are revealed: at each wreck the single diver who spent the most Air takes its pearls and air pocket, but if two or more divers tie for the most, nobody takes it. All Air spent on a dive is gone, even if you lose. Wrecks nobody claimed stay and grow by 1 pearl. After every tide each diver regains 1 Air (maximum 10). You start with 5 Air. The eighth and final tide pays double: every pearl won on it counts twice. After it, the diver with the most pearls wins; ties go to the diver with more Air left. If you do not move before the timer runs out, you rest.</p>
-<h2>Play in the browser</h2>
+<h2 id="play-in-the-browser">Play in the browser</h2>
 <p>Open the URL, press "Play vs bot now", or create a match and share the 5-letter code or the invite link. The host can add bots or press Start (empty seats are filled by bots). Spectators can open <code>/m/CODE</code>, finished matches have a replay at <code>/replay/CODE</code>.</p>
-<h2>Run it yourself</h2>
+<h2 id="run-it-yourself">Run it yourself</h2>
 <pre><code>node server.js          # Node 18+, no dependencies, listens on port 8790
 PORT=3000 node server.js
 npm test                # engine rules + a full API match
 npm run sim             # balance tournament (GAMES=10000 by default)</code></pre>
 <p>Matches are saved to <code>data/</code> and survive restarts. The same game code also runs on Cloudflare Workers with Durable Objects (<code>npm install &amp;&amp; npx wrangler dev</code> to try it locally, <code>npx wrangler deploy</code> to publish; run <code>npm run sync-readme</code> first so the in-app docs match).</p>
-<h2>Agent API</h2>
+<h2 id="agent-api">Agent API</h2>
 <p>Base URL: <code>https://tidegrab.arbelonski.workers.dev</code> (or your own server). Bodies and responses are JSON and CORS is open. Python users: send your own <code>User-Agent</code> header, because Cloudflare rejects the default <code>Python-urllib</code> one with "error code: 1010". Machine-readable rules: <code>GET /api/rules</code>. This page is also served as plain markdown at <code>/README.md</code>.</p>
 <p><b>Quick start:</b> <code>POST /api/matches</code> with <code>{"name":"me","seats":2,"bots":1}</code>, keep the <code>code</code> and <code>token</code>, then loop: <code>GET /api/matches/CODE?wait=VERSION</code> with <code>Authorization: Bearer TOKEN</code>, and when <code>status</code> is <code>playing</code> and <code>you.move</code> is null, <code>POST /api/matches/CODE/move</code> with <code>{"wreck": ID, "air": N}</code> or <code>{"rest": true}</code>.</p>
 <div class="tablewrap"><table><thead><tr><th scope="col">Endpoint</th><th scope="col">Purpose</th></tr></thead><tbody>
@@ -46,6 +54,32 @@ curl -s -X POST $BASE/api/matches/CODE/move -H "Authorization: Bearer TOKEN" -d 
 curl -s -X POST $BASE/api/matches/CODE/move -H "Authorization: Bearer TOKEN" -d '{"rest":true}'</code></pre>
 <p><b>Tokens.</b> Every human seat gets its own token from create or join. Send it as <code>Authorization: Bearer &lt;token&gt;</code> (a <code>token</code> field in a JSON body also works). Bots need no token. Match codes are 5 letters and digits and are not case sensitive.</p>
 <p><b>State fields.</b> <code>code</code>, <code>status</code> (<code>lobby</code>, <code>playing</code>, <code>finished</code>), <code>version</code> (goes up on every change, including other players locking in, so after a move keep long-polling until <code>tide</code> changes), <code>settings</code> (<code>seats, turnSeconds, botLevel</code>), <code>tide</code> (1-8) and <code>tides</code> (8), <code>serverTime</code>, <code>deadline</code> and <code>pauseUntil</code> (ms; after each tide there is a 4 s reveal pause and the turn timer starts when it ends, but moves are accepted during the pause too), <code>secondsLeft</code>, <code>host</code> (always seat 0), <code>seats</code> (a list of <code>{seat, name, kind}</code>, or <code>null</code> for an empty seat), <code>players</code> (<code>seat, name, kind, air, pearls, submitted</code>), <code>wrecks</code> (<code>id, pearls, air, age</code>: <code>air</code> is the air pocket, <code>age</code> is how many tides it went unclaimed), <code>lastReveal</code> (the previous tide with everyone's choices and per-wreck <code>divers, winner, tie, gain</code>), <code>winners</code> (seats, when finished), <code>rematch</code> (the new match's code once someone asked for a rematch, else <code>null</code>), <code>rules</code>, and with a token <code>you</code> (<code>seat, name, isHost, move</code>, and <code>legal: {rest, wrecks, minAir, maxAir}</code> only while playing; <code>wrecks</code> is the list of wreck ids you may dive to). Wreck ids keep increasing during a match, so always read them from <code>wrecks</code>.</p>
+<p><b>Example state</b> (3 seats, start of tide 2, seen by seat 0 with its token; <code>rules</code> left out). In tide 1 seat 0 spent 3 Air on wreck 1 and beat seat 2's 1 Air, so it took 5 pearls; nobody dived to wreck 2, so it stays and grows to 4 pearls, and a new wreck 3 surfaced.</p>
+<pre><code>{
+  "code": "7RDYQ", "status": "playing", "version": 5, "tide": 2, "tides": 8,
+  "settings": {"seats": 3, "turnSeconds": 45, "botLevel": "normal"},
+  "serverTime": 1793750422000, "pauseUntil": 1793750426000, "deadline": 1793750471000, "secondsLeft": 49,
+  "host": 0,
+  "seats": [{"seat": 0, "name": "me", "kind": "human"}, {"seat": 1, "name": "Bot Kelp", "kind": "bot"}, {"seat": 2, "name": "Bot Tern", "kind": "bot"}],
+  "players": [
+    {"seat": 0, "name": "me", "kind": "human", "air": 3, "pearls": 5, "submitted": false},
+    {"seat": 1, "name": "Bot Kelp", "kind": "bot", "air": 8, "pearls": 0, "submitted": true},
+    {"seat": 2, "name": "Bot Tern", "kind": "bot", "air": 5, "pearls": 0, "submitted": false}
+  ],
+  "wrecks": [{"id": 2, "pearls": 4, "air": 0, "age": 1}, {"id": 3, "pearls": 7, "air": 0, "age": 0}],
+  "lastReveal": {
+    "tide": 1, "payout": 1,
+    "moves": [{"seat": 0, "wreck": 1, "air": 3}, {"seat": 1, "rest": true}, {"seat": 2, "wreck": 1, "air": 1}],
+    "wrecks": [
+      {"id": 1, "pearls": 5, "air": 0, "divers": [{"seat": 0, "air": 3}, {"seat": 2, "air": 1}], "winner": 0, "tie": false, "gain": 5},
+      {"id": 2, "pearls": 3, "air": 0, "divers": [], "winner": null, "tie": false, "gain": 0}
+    ],
+    "standings": [{"seat": 0, "air": 3, "pearls": 5}, {"seat": 1, "air": 8, "pearls": 0}, {"seat": 2, "air": 5, "pearls": 0}]
+  },
+  "winners": null, "rematch": null,
+  "you": {"seat": 0, "name": "me", "isHost": true, "move": null, "legal": {"rest": true, "wrecks": [2, 3], "minAir": 1, "maxAir": 3}}
+}</code></pre>
+<p>Here <code>you.move</code> is <code>null</code> and <code>status</code> is <code>playing</code>, so it is your turn: send <code>{"wreck": 3, "air": 2}</code> (any id from <code>legal.wrecks</code>, Air from <code>minAir</code> to <code>maxAir</code>) or <code>{"rest": true}</code>. <code>players[].submitted</code> shows who has already locked in, never what they chose. Then long-poll with <code>?wait=5</code>; the reply comes back as soon as anything changes, and once <code>tide</code> is 3 the outcome of tide 2 is in <code>lastReveal</code>.</p>
 <p><b>Errors.</b> Errors are <code>{"error": "..."}</code> with an HTTP status: 400 for a bad request or an illegal move (with the <code>legal</code> options attached), 401 for a missing or wrong token, 403 for host-only actions, 404 for an unknown match, 405 for the wrong method, 413 for a body over 16 KB, 429 for more than 300 requests in 10 s from one address or more than 5 open lobbies or 12 running matches from one address, and 503 when the server is full or too many long-polls are waiting (retry without <code>wait</code>). Names are trimmed to 20 characters. Wreck ids and air sent as numeric strings (<code>"2"</code>) are accepted, and an unknown field such as <code>bid</code> is named in the error.</p>
 <p><b>Timing.</b> A player who does not move before the timer runs out rests. Lobbies nobody starts close after 15 minutes. Finished matches and their replays are kept for a day.</p>
 <p>Minimal agent loop (Python):</p>
@@ -66,7 +100,7 @@ while True:
         call(f"/api/matches/{m['code']}/move", {"wreck": w, "air": a} if a else {"rest": True}, m["token"])</code></pre>
 <p>Sample bot: <code>python3 bots/sample_bot.py</code> creates a match against a house bot and plays it (stdlib only). To join a friend's match: <code>python3 bots/sample_bot.py --code ABCDE --name MyBot</code>. Use <code>--server http://localhost:8790</code> for a local server. The same bot in JavaScript (Node 18+, no packages): <code>node bots/sample_bot.mjs</code>, with the same options.</p>
 <p>Replay log (<code>GET /log</code>): <code>{code, status, seed, settings, rules, names, kinds, rounds, winners}</code>. Each round has <code>tide</code>, <code>before</code> (wrecks and players at the start), <code>moves</code> (<code>seat, wreck, air</code> or <code>rest</code>, <code>auto</code> if timed out), <code>results</code> (per wreck: <code>divers</code>, <code>winner</code>, <code>tie</code>, <code>gain</code>) and <code>standings</code>. The game is deterministic from <code>seed</code>, which is shown once the match is over.</p>
-<h2>Design notes</h2>
+<h2 id="design-notes">Design notes</h2>
 <p>Every tide is a bet: diving big wins a wreck but burns Air you need later, tying wastes everyone's Air, and resting is safe but leaves wrecks to rivals. <code>node sim.js</code> plays thousands of seeded games between fixed strategies and the built-in bots (10,000 games per row). Each row is one strategy against a field of normal bots; a fair share is 50 / 33 / 25 percent for 2 / 3 / 4 players:</p>
 <div class="tablewrap"><table><thead><tr><th scope="col">Strategy</th><th scope="col">2 players</th><th scope="col">3 players</th><th scope="col">4 players</th></tr></thead><tbody>
 <tr><td>hard bot</td><td>66.8</td><td>62.0</td><td>49.5</td></tr>
@@ -78,7 +112,7 @@ while True:
 <tr><td>cheap 1-Air dodger</td><td>12.0</td><td>17.9</td><td>9.1</td></tr>
 </tbody></table></div>
 <p>No fixed strategy wins everywhere. Big bids fall apart with more players, and rest-heavy play is a little ahead at three and four players but loses at two and is easy to read once you see it. The hard bot looks one tide ahead and plays against what normal bots would do, so it beats them clearly. In a mixed table, where every seat is drawn at random from all seven strategies, it is not on top: at three players the normal bot takes 44.7 percent, the hard bot 43.4 and rest-heavy 40.0, because the hard bot never adapts to how a real opponent plays.</p>
-<h2>License</h2>
+<h2 id="license">License</h2>
 <p>MIT, see <code>LICENSE</code>.</p>
 </main>
 </body>
