@@ -126,6 +126,7 @@ h2 .event { margin-left: 8px; }
 .rw .dv { display: flex; justify-content: space-between; font-size: 0.92rem; padding: 2px 0; }
 .rw .dv.top { color: var(--gold); font-weight: 700; }
 .why { margin-top: 2px; font-size: 0.875rem; color: var(--muted); }
+.mine-note { margin-top: 4px; font-size: 0.875rem; color: var(--gold); font-weight: 600; }
 .keys { margin: 8px 0 0; }
 .recon { margin: 8px 0 0; color: var(--bad); }
 @media (hover: none) { .keys { display: none; } }
@@ -249,3 +250,10 @@ h2 .mine { margin: 0 0 0 10px; font-size: 0.75rem; vertical-align: middle; color
 .docintro { margin: 8px 0 18px; }
 .docintro p { margin: 0 0 12px; }
 .pl .form { font-size: .8rem; color: var(--muted); margin-top: 2px; }
+
+/* Phones: keep the move controls on screen while scrolling the wrecks. */
+@media (max-width: 720px) {
+  .movecard { position: sticky; bottom: 0; z-index: 5; padding-top: 10px; padding-bottom: 10px; box-shadow: 0 -10px 24px rgba(0, 0, 0, 0.45); }
+  .movecard h2 { font-size: 1rem; margin-bottom: 6px; }
+}
+@media (hover: none) { .movecard .keys { display: none; } }

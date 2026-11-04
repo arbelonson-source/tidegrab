@@ -36,6 +36,9 @@ test("rematch keeps the table together", async () => {
     for (const t of [a.token, b.token]) if (s.status === "playing") await call(`/api/matches/${a.code}/move`, { rest: true }, t);
     await new Promise((r) => setTimeout(r, 20));
   }
+  const late = await call(`/api/matches/${a.code}/join`, { name: "Cat" });
+  assert.equal(late.status, 409);
+  assert.equal(late.json.code, "match_over");
   assert.equal((await call(`/api/matches/${a.code}/rematch`, {})).status, 401);
   const ra = (await call(`/api/matches/${a.code}/rematch`, {}, a.token)).json;
   assert.match(ra.code, /^[A-Z0-9]{5}$/);

@@ -86,6 +86,7 @@ async function api(path, opts = {}) {
   if (!r.ok) {
     const e = new Error(data.error || "request failed (" + r.status + ")");
     e.status = r.status;
+    e.code = data.code;
     throw e;
   }
   return data;
@@ -122,7 +123,7 @@ const sv = (inner) => `<svg viewBox="0 0 120 64" width="120" height="64" aria-hi
 const HELP_ART = [
   sv('<g fill="none" stroke="#3fd6c8" stroke-width="2"><path d="M8 52h30l-4-18H14z" fill="#0a2a44"/><path d="M62 52h30l-4-18H66z" fill="#0a2a44"/></g><circle cx="26" cy="26" r="6" fill="#f2c14e"/><rect x="79" y="7" width="36" height="20" rx="5" fill="#16425f" stroke="#3fd6c8"/><text x="97" y="21" text-anchor="middle" font-size="12.5" fill="#e6f6f8" font-family="sans-serif">air 3</text><path d="M97 28v8" stroke="#f2c14e" stroke-width="2"/>'),
   sv('<path d="M6 54h46l-5-20H11z" fill="#0a2a44" stroke="#3fd6c8" stroke-width="2"/><circle cx="29" cy="26" r="6" fill="#f2c14e"/><text x="29" y="12" text-anchor="middle" font-size="12.5" fill="#e6f6f8" font-family="sans-serif">5 vs 3</text><path d="M70 54h46l-5-20H75z" fill="#0a2a44" stroke="#ff8a7a" stroke-width="2" stroke-dasharray="4 3"/><circle cx="93" cy="26" r="6" fill="#f2c14e"/><circle cx="104" cy="22" r="4" fill="#f2c14e"/><text x="93" y="12" text-anchor="middle" font-size="12.5" fill="#e6f6f8" font-family="sans-serif">4 vs 4</text>'),
-  sv('<g font-family="sans-serif" font-size="12.5" fill="#e6f6f8"><rect x="6" y="10" width="14" height="40" rx="3" fill="#16425f" stroke="#3fd6c8"/><rect x="26" y="30" width="14" height="20" rx="3" fill="#16425f" stroke="#3fd6c8" stroke-dasharray="3 2"/><text x="23" y="62" text-anchor="middle">air</text><circle cx="66" cy="38" r="8" fill="#f2c14e"/><text x="66" y="62" text-anchor="middle">x2</text><circle cx="98" cy="26" r="9" fill="#f2c14e"/><circle cx="108" cy="40" r="6" fill="#f2c14e"/><text x="90" y="62" text-anchor="middle">most wins</text></g>')
+  sv('<g font-family="sans-serif" font-size="12.5" fill="#e6f6f8"><rect x="6" y="10" width="14" height="40" rx="3" fill="#16425f" stroke="#3fd6c8"/><rect x="26" y="30" width="14" height="20" rx="3" fill="#16425f" stroke="#3fd6c8" stroke-dasharray="3 2"/><text x="23" y="62" text-anchor="middle">air</text><circle cx="66" cy="38" r="8" fill="#f2c14e"/><text x="66" y="22" text-anchor="middle" font-weight="700">x2</text><circle cx="98" cy="26" r="9" fill="#f2c14e"/><circle cx="108" cy="40" r="6" fill="#f2c14e"/><text x="90" y="62" text-anchor="middle">most wins</text></g>')
 ];
 let helpDlg = null, helpOpener = null;
 function helpDialog() {
@@ -232,7 +233,12 @@ function home() {
       try {
         const r = await api(`/matches/${code}/join`, { body: { name: nameIn.value } });
         store.set("tg:t:" + code, r.token);
-      } catch (e) { if (/no such match/i.test(e.message)) throw new Error("No match with code " + code); }
+      } catch (e) {
+        if (e.status === 404) throw new Error("No match with code " + code);
+        if (e.status !== 409) throw e;
+        // go() reloads the page, so hand the note to the next page instead of toasting here.
+        try { sessionStorage.setItem("tg:note", e.code === "match_over" ? "That match is over. Showing the results." : "That table is full. You are watching instead."); } catch { /* storage unavailable */ }
+      }
     }
     go("/m/" + code);
   });
@@ -268,7 +274,7 @@ function home() {
     let delay = 20000;
     try {
       const d = await api("/matches");
-      syncList(lobbies, d.open.map((m) => ({ key: m.code, text: `${m.code} · ${m.host} · ${m.filled}/${m.seats}`, href: "/m/" + m.code, label: "Join", aria: "Join table " + m.code })), "No open tables right now.");
+      syncList(lobbies, d.open.map((m) => ({ key: m.code, text: `${m.code} · ${m.host} · ${m.filled}/${m.seats}` + (m.waitingSeconds == null ? "" : m.waitingSeconds < 60 ? " · just opened" : ` · ${Math.floor(m.waitingSeconds / 60)} min`), href: "/m/" + m.code, label: "Join", aria: "Join table " + m.code })), "No open tables right now.");
       syncList(live, d.live.slice(0, 6).map((m) => ({ key: m.code, text: `${m.code} · ${m.players.join(", ")} · tide ${m.tide}/${m.tides}`, href: "/m/" + m.code, label: "Watch", aria: "Watch match " + m.code })), "No matches in progress.");
     } catch { delay = 60000; }
     inflight = false;
@@ -385,16 +391,29 @@ function revealPanel(rv, names, title, opts = {}) {
         w.winner != null ? h("span", { class: "plus", "aria-hidden": "true" }, "+" + (w.gain ?? w.pearls)) : null,
         w.divers.length && !opts.hideBids ? w.divers.map((d, j) => h("div", { class: "dv" + (w.winner === d.seat && j === 0 ? " top" : "") }, h("span", {}, nm(d.seat)), h("span", {}, d.air + " air"))) : null,
         h("div", { class: "verdict" }, verdict),
-        why(w) && !opts.hideBids ? h("div", { class: "why" }, why(w)) : null);
+        why(w) && !opts.hideBids ? h("div", { class: "why" }, why(w)) : null,
+        lostNote(w, opts.me));
     })),
     rests.length ? h("div", { class: "rests" }, "Rested: " + rests.join(", ")) : null);
+}
+
+// A line just for you when you dived here and did not win: how close it was.
+function lostNote(w, me) {
+  const d = me == null ? null : w.divers.find((x) => x.seat === me);
+  if (!d || w.winner === me) return null;
+  const top = Math.max(...w.divers.map((x) => x.air));
+  return h("div", { class: "mine-note" }, d.air === top ? "You tied for the top bid, so nobody took it" : `You lost by ${top - d.air} air`);
 }
 
 const norm = (r) => ({ ...r, wrecks: r.results || r.wrecks });
 
 function roundLine(r, names) {
   const nm = (s) => names[s] || "Seat " + (s + 1);
-  const parts = r.wrecks.filter((w) => w.divers.length).map((w) => w.winner != null ? `${nm(w.winner)} took #${w.id} (${w.gain ?? w.pearls})` : `#${w.id} silted out`);
+  const bids = (ds) => ds.map((d) => `${nm(d.seat)} ${d.air}`).join(", ");
+  const parts = r.wrecks.filter((w) => w.divers.length).map((w) => {
+    const ds = [...w.divers].sort((a, b) => b.air - a.air), lost = ds.filter((d) => d.seat !== w.winner);
+    return w.winner != null ? `${nm(w.winner)} took #${w.id} (${w.gain ?? w.pearls}) with ${ds[0].air} air${lost.length ? " over " + bids(lost) : ""}` : `#${w.id} silted out (${bids(ds)})`;
+  });
   const rested = r.moves.filter((m) => m.rest).length;
   if (rested) parts.push(rested + " rested");
   return `Tide ${r.tide}${EV_NAME[r.event] ? ` (${EV_NAME[r.event]})` : ""}: ` + (parts.join(" · ") || "quiet tide");
@@ -467,11 +486,14 @@ function match(code) {
       h("div", { class: "emotes" }, chips.length ? chips : h("span", { class: "muted" }, st.you ? "Reactions from the table show up here." : "You are watching. Reactions are open to everyone.")));
   }
 
-  let endAt = 0;
+  let endAt = 0, retry = 0;
   async function loop() {
     while (alive) {
       try {
-        const s = await api(`/matches/${code}?wait=${ver}` + (token ? "" : "&viewer=" + viewerId()), { token, signal: ac.signal });
+        // While reconnecting, ask for the state at once instead of long-polling, so the banner clears as soon as the network is back.
+        const q = [recon ? "" : "wait=" + ver, token ? "" : "viewer=" + viewerId()].filter(Boolean).join("&");
+        const s = await api(`/matches/${code}` + (q ? "?" + q : ""), { token, signal: ac.signal });
+        retry = 0;
         if (!alive) return;
         offset = s.serverTime ? s.serverTime - Date.now() : 0;
         ver = s.version;
@@ -496,7 +518,12 @@ function match(code) {
         if (!alive) return;
         if (e.status === 404) { root.replaceChildren(h("section", { class: "card center" }, h("h2", {}, "No such match"), h("p", {}, `There is no match with code ${code}.`), h("a", { class: "btn primary", href: "/" }, "Back home"))); return; }
         if (!recon) { recon = true; render(); }
-        await new Promise((r) => setTimeout(r, 2000));
+        // Back off 1, 2, 4, 8 s, but retry right away when the browser says it is online again.
+        await new Promise((r) => {
+          const done = () => { clearTimeout(t); window.removeEventListener("online", done); r(); };
+          const t = setTimeout(done, Math.min(1000 * 2 ** retry++, 8000));
+          window.addEventListener("online", done);
+        });
       }
     }
   }
@@ -534,8 +561,10 @@ function match(code) {
 
   function onKey(e) {
     if (!alive || !st || st.status !== "playing" || !st.you || !st.you.legal) return;
-    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.ctrlKey || e.metaKey || e.altKey || (helpDlg && helpDlg.open)) return;
     const t = e.target;
+    // Enter on a focused control (Rest, an emote, the ? button) should press that control, not dive. Wreck cards still dive.
+    if (e.key === "Enter" && t && t.tagName === "BUTTON" && !t.classList.contains("wreck")) return;
     if (t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable || (t.tagName === "A" && e.key === "Enter"))) return;
     const maxA = st.you.legal.maxAir || 0;
     if (/^[1-4]$/.test(e.key)) {
@@ -616,7 +645,7 @@ function match(code) {
     const gain = st.event === "current" ? st.rules.currentRest : st.rules.restGain;
     const diveOn = !!(m && !m.rest && m.wreck === sel && m.air === airVal);
     const away = st.players[you.seat] && st.players[you.seat].away;
-    return h("section", { class: "card" }, h("h2", {}, "Your move"),
+    return h("section", { class: "card movecard" }, h("h2", {}, "Your move"),
       away && !m ? h("p", { class: "awaynote", role: "status" }, "You missed the last tides, so the table stopped waiting for you. Make any move to rejoin.") : null,
       h("div", { class: "act" },
         h("div", { class: "stepper", role: "group", "aria-label": "Air to spend" }, h("button", { "data-k": "less", "aria-label": "Less air", disabled: broke || airVal <= 1, onclick: () => { airVal--; render(); } }, "−"), h("output", { "aria-live": "polite" }, airVal), h("button", { "data-k": "more", "aria-label": "More air", disabled: broke || airVal >= maxA, onclick: () => { airVal++; render(); } }, "+"), h("span", { class: "sub" }, broke ? "no air left" : `of ${maxA} air`)),
@@ -626,17 +655,19 @@ function match(code) {
       h("p", { class: m ? "locked" : "sub" }, m ? (m.rest ? "Locked in: rest. You can still change your mind." : `Locked in: ${m.air} air at wreck #${m.wreck}. You can still change it.`)
         : broke ? `You are out of Air, so this tide you can only rest. Resting gives +${gain} Air for the next tide.`
         : maxA === 1 ? `Low on Air: you can only bid 1, so most wrecks are out of reach. Resting gives +${gain} Air for the next tide.`
+        : st.tide === 1 ? "First tide: the highest bid on a wreck takes all its pearls, and spent Air is gone either way. 2 or 3 Air on the richest wreck is a fair start."
         : "Choose a wreck, set your Air, then dive. Moves stay secret until the tide resolves."),
       h("div", { class: "err", role: "alert" }, errMsg));
   }
 
   function eventsLine() {
-    const now = EV_NAME[st.event], next = EV_NAME[st.nextEvent];
-    if (!now && !next) return null;
+    const now = EV_NAME[st.event], next = EV_NAME[st.nextEvent], lastNext = st.tide === st.tides - 1;
+    if (!now && !next && !lastNext) return null;
     const txt = (e) => st.rules.eventText[e].replace(/^[^:]*:\s*/, "");
     return h("div", { class: "events" },
       now ? h("p", {}, h("span", { class: "event" }, now), " ", txt(st.event).replace(/^./, (c) => c.toUpperCase())) : null,
-      next ? h("p", { class: "muted" }, "Next tide: ", h("b", {}, next), ", " + txt(st.nextEvent)) : null);
+      next ? h("p", { class: "muted" }, "Next tide: ", h("b", {}, next), ", " + txt(st.nextEvent)) : null,
+      lastNext ? h("p", {}, "Next tide is the last one: ", h("b", {}, "pearls count double"), ". Save some air for it.") : null);
   }
 
   function gameView() {
@@ -653,7 +684,7 @@ function match(code) {
     }
     const pausing = !finished && isPausing();
     let rev = null;
-    if (st.lastReveal) { const fr = animR !== st.lastReveal.tide; if (fr && animR !== -1) newReveal = true; animR = st.lastReveal.tide; rev = h("section", { class: fr ? "card rv fresh" : "card rv" }, revealPanel(st.lastReveal, names())); }
+    if (st.lastReveal) { const fr = animR !== st.lastReveal.tide; if (fr && animR !== -1) newReveal = true; animR = st.lastReveal.tide; rev = h("section", { class: fr ? "card rv fresh" : "card rv" }, revealPanel(st.lastReveal, names(), undefined, { me: st.you ? st.you.seat : null })); }
     out.push(playersPanel(st.players, { me: st.you && st.you.seat, winners: finished ? st.winners : [], hideStatus: finished, pausing }));
     if (rev && (pausing || finished)) out.push(rev);
     if (!finished) {
@@ -690,7 +721,9 @@ function match(code) {
       const r = await api(`/matches/${code}/rematch`, { body: {}, token });
       store.set("tg:t:" + r.code, r.token);
       go("/m/" + r.code);
-    } catch {
+    } catch (e) {
+      // Only start a fresh table when this one can't be used (seat lost or match gone); otherwise say why, so two players don't split up.
+      if (e.status !== 401 && e.status !== 404) return toast(e.status ? e.message : "Could not reach the server. Try again.");
       try {
         const bots = st.players.filter((p) => p.kind === "bot").length;
         await createMatch({ name: st.you.name || myName(), seats: st.settings.seats, bots, turnSeconds: st.settings.turnSeconds, botLevel: st.settings.botLevel });
@@ -780,7 +813,7 @@ async function replay(code) {
     body.replaceChildren(
       playersPanel(players, { hideStatus: true, winners: i === last ? log.winners || [] : [] }),
       h("section", { class: shown !== i ? "card fresh" : "card" }, revealPanel(r, names, "Dives and results", { hideBids: !bids })),
-      i === last && log.status === "finished" ? finalCard(players) : null);
+      ...(i === last && log.status === "finished" ? [finalCard(players)] : []));
     shown = i;
   }
   function finalCard(players) {
@@ -805,3 +838,4 @@ let mt;
 if ((mt = /^\/m\/([A-Za-z0-9]+)\/?$/.exec(path))) match(mt[1].toUpperCase());
 else if ((mt = /^\/replay\/([A-Za-z0-9]+)\/?$/.exec(path))) replay(mt[1].toUpperCase());
 else home();
+try { const note = sessionStorage.getItem("tg:note"); if (note) { sessionStorage.removeItem("tg:note"); toast(note); } } catch { /* storage unavailable */ }

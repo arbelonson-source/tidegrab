@@ -1,4 +1,4 @@
-import { randInt } from "./room.js";
+import { randInt, LOBBY_TTL } from "./room.js";
 
 export const CODE_CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 export const MAX_LIVE = 60;
@@ -82,7 +82,9 @@ export class Registry {
     for (const [code, s] of this.items) {
       const seen = s.seen || s.createdAt;
       const done = s.status === "finished" || s.status === "expired";
-      if (s.createdAt < now - STALE_MS || (done && seen < now - DONE_KEEP_MS) || (s.status === "playing" && seen < now - 2.5 * LIVE_SILENT_MS)) {
+      // A lobby closes itself after LOBBY_TTL; drop it here too in case that news never arrived.
+      const oldLobby = s.status === "lobby" && s.createdAt < now - LOBBY_TTL - 60000;
+      if (oldLobby || s.createdAt < now - STALE_MS || (done && seen < now - DONE_KEEP_MS) || (s.status === "playing" && seen < now - 2.5 * LIVE_SILENT_MS)) {
         this.items.delete(code);
         dropped++;
       }
@@ -95,9 +97,10 @@ export class Registry {
     const live = [];
     this.prune(now);
     for (const s of this.items.values()) {
-      if (s.status === "lobby" && s.players) open.push({ code: s.code, host: s.host, seats: s.seats, filled: s.filled, turnSeconds: s.turnSeconds });
+      if (s.status === "lobby" && s.players && s.createdAt >= now - LOBBY_TTL) open.push({ code: s.code, host: s.host, seats: s.seats, filled: s.filled, turnSeconds: s.turnSeconds, waitingSeconds: Math.max(0, Math.round((now - s.createdAt) / 1000)) });
       else if (s.status === "playing" && (s.seen || s.createdAt) >= now - LIVE_SILENT_MS) live.push({ code: s.code, players: s.players, tide: s.tide, tides: s.tides });
     }
+    open.sort((a, b) => a.waitingSeconds - b.waitingSeconds);
     return { open, live };
   }
 }

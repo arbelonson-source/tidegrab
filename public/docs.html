@@ -29,7 +29,7 @@
 <p><b>Writing a bot?</b> Three calls are enough: create a match, long-poll its state, send a move. See <a href="#agent-api">Agent API</a> below, or run <code>python3 bots/sample_bot.py</code> (or <code>node bots/sample_bot.mjs</code>) to watch one play a full match.</p>
 <h2 id="full-rules">Full rules</h2>
 <p>Two to four divers race through eight tides. Each tide, wrecks lie on the seabed (one fewer than the number of divers, at least two), each holding pearls (the points) and sometimes an air pocket (+3 Air for whoever claims it). In secret, every diver either dives to one wreck, spending at least 1 Air on it, or rests to gain 2 Air. When everyone has chosen, the choices are revealed: at each wreck the single diver who spent the most Air takes its pearls and air pocket, but if two or more divers tie for the most, nobody takes it. All Air spent on a dive is gone, even if you lose. Wrecks nobody claimed stay and grow by 1 pearl. After every tide each diver regains 1 Air (maximum 10). You start with 5 Air. The eighth and final tide pays double: every pearl won on it counts twice. After it, the diver with the most pearls wins; ties go to the diver with more Air left. If you do not move before the timer runs out, you rest.</p>
-<p><b>Tide events.</b> Four of the first seven tides bring a public event, each of the four below exactly once, in an order dealt from the match seed and always shown one tide ahead (the final tide is never an event, it already pays double):</p>
+<p><b>Tide events.</b> Tide 1 is always calm and opens with a wreck of at least 6 pearls. Four of tides 2 to 7 bring a public event, each of the four below exactly once, in an order dealt from the match seed and always shown one tide ahead (the final tide is never an event, it already pays double):</p>
 <ul>
 <li><b>Strong current:</b> resting this tide gives +3 Air instead of +2.</li>
 <li><b>Rich seam:</b> the new wreck that appears this tide starts with 3 extra pearls.</li>
@@ -43,7 +43,7 @@
 <pre><code>node server.js          # Node 18+, no dependencies, listens on port 8790
 PORT=3000 node server.js
 npm test                # engine rules + a full API match
-npm run sim             # balance tournament (GAMES=10000 by default)</code></pre>
+npm run sim             # balance tournament (6,000 games per row; GAMES=10000 for the table below)</code></pre>
 <p>Matches are saved to <code>data/</code> and survive restarts. The same game code also runs on Cloudflare Workers with Durable Objects (<code>npm install &amp;&amp; npx wrangler dev</code> to try it locally, <code>npx wrangler deploy</code> to publish; run <code>npm run sync-readme</code> first so the in-app docs match).</p>
 <h2 id="agent-api">Agent API</h2>
 <p>Base URL: <code>https://tidegrab.arbelonski.workers.dev</code> (or your own server). Bodies and responses are JSON and CORS is open.</p>
@@ -126,15 +126,17 @@ while True:
 <h2 id="design-notes">Design notes</h2>
 <p>Every tide is a bet: diving big wins a wreck but burns Air you need later, tying wastes everyone's Air, and resting is safe but leaves wrecks to rivals. <code>node sim.js</code> plays thousands of seeded games between fixed strategies and the built-in bots (10,000 games per row). Each row is one strategy against a field of normal bots; a fair share is 50 / 33 / 25 percent for 2 / 3 / 4 players:</p>
 <div class="tablewrap"><table><thead><tr><th scope="col">Strategy</th><th scope="col">2 players</th><th scope="col">3 players</th><th scope="col">4 players</th></tr></thead><tbody>
-<tr><td>hard bot</td><td>68.9</td><td>63.4</td><td>50.4</td></tr>
-<tr><td>normal bot</td><td>49.9</td><td>34.0</td><td>24.8</td></tr>
-<tr><td>rest-heavy</td><td>42.2</td><td>34.1</td><td>26.7</td></tr>
-<tr><td>always big bid</td><td>37.9</td><td>19.0</td><td>16.3</td></tr>
-<tr><td>easy bot</td><td>16.4</td><td>21.5</td><td>13.4</td></tr>
-<tr><td>random</td><td>16.8</td><td>20.8</td><td>14.2</td></tr>
-<tr><td>cheap 1-Air dodger</td><td>11.5</td><td>18.3</td><td>9.2</td></tr>
+<tr><td>hard bot</td><td>67.5</td><td>61.7</td><td>49.7</td></tr>
+<tr><td>normal bot</td><td>50.1</td><td>34.2</td><td>25.6</td></tr>
+<tr><td>sample bot (<code>bots/sample_bot.py</code>)</td><td>49.2</td><td>32.9</td><td>27.8</td></tr>
+<tr><td>rest-heavy</td><td>43.9</td><td>34.5</td><td>27.2</td></tr>
+<tr><td>always big bid</td><td>38.8</td><td>19.8</td><td>17.4</td></tr>
+<tr><td>half your Air on the richest wreck</td><td>27.6</td><td>20.3</td><td>15.0</td></tr>
+<tr><td>easy bot</td><td>15.5</td><td>20.7</td><td>13.4</td></tr>
+<tr><td>random</td><td>15.8</td><td>20.9</td><td>13.8</td></tr>
+<tr><td>cheap 1-Air dodger</td><td>10.9</td><td>18.2</td><td>9.6</td></tr>
 </tbody></table></div>
-<p>No fixed strategy wins everywhere. Big bids fall apart with more players, and rest-heavy play sits close to a fair share at three and four players but loses at two and is easy to read once you see it. The hard bot looks one tide ahead and plays against what normal bots would do, so it beats them clearly. In a mixed table, where every seat is drawn at random from all the strategies (the sample bot included), it is not on top: at three players the normal bot takes 48.7 percent, the hard bot 44.8 and rest-heavy 39.3, because the hard bot never adapts to how a real opponent plays. Tide events are on in all of these numbers, and they mostly take away the edge that fixed styles had without them: against the same field of normal bots with events off, the sample bot drops from 39.8 to 32.8 percent at three players and rest-heavy from 38.2 to 34.1, while the hard bot, which plans with the announced event, gains most in mixed four-player tables (33.8 to 39.1).</p>
+<p>No fixed strategy wins everywhere. Big bids fall apart with more players, and rest-heavy play sits close to a fair share at three and four players but loses at two and is easy to read once you see it. The hard bot looks one tide ahead, plans with the announced tide event, and models each rival from the bids it has seen so far (steady players are predicted from their own history, erratic ones from what a normal bot would do), so it beats the normal bots clearly. It also stays on top in a mixed table, where every seat is drawn at random from all the strategies: 82.6 / 59.2 / 52.3 percent at 2 / 3 / 4 players, against 66.0 / 55.1 / 48.7 for the normal bot. Tide events are on in all of these numbers, and they take away most of the edge that fixed styles had without them: against normal bots at three players with events off, the sample bot takes 38.8 percent, rest-heavy 38.6 and "richest wreck plus one" 35.3, and with events on that drops to 32.9, 34.5 and 24.4.</p>
 <h2 id="license">License</h2>
 <p>MIT, see <code>LICENSE</code>.</p>
 </main>

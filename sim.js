@@ -11,6 +11,7 @@ function mulberry(seed) {
   };
 }
 
+const richest = (g) => g.wrecks.reduce((a, b) => (b.pearls > a.pearls || (b.pearls === a.pearls && b.air > a.air) ? b : a));
 const biggest = (g) => g.wrecks.reduce((a, b) => (b.pearls + b.air > a.pearls + a.air ? b : a));
 
 export const strategies = {
@@ -34,6 +35,31 @@ export const strategies = {
     const best = g.wrecks.reduce((a, b) => (v(b) > v(a) ? b : a));
     return { wreck: best.id, air: Math.max(1, Math.min(air, Math.round(air * 0.3 + v(best) * 0.25 + (r() * 2 - 1)))) };
   },
+  halfRichest: (g, s) => {
+    const air = g.players[s].air;
+    if (air < 2) return { rest: true };
+    return { wreck: richest(g).id, air: Math.ceil(air / 2) };
+  },
+  halfRichestNoisy: (g, s, r) => {
+    const air = g.players[s].air;
+    if (air < 2 || r() < 0.15) return { rest: true };
+    return { wreck: richest(g).id, air: Math.ceil(air / 2) };
+  },
+  allInRichest: (g, s) => {
+    const air = g.players[s].air;
+    if (air < 3) return { rest: true };
+    return { wreck: richest(g).id, air };
+  },
+  richestPlusOne: (g, s) => {
+    const air = g.players[s].air;
+    if (air < 2) return { rest: true };
+    return { wreck: richest(g).id, air: Math.min(air, Math.ceil(air / 2) + 1) };
+  },
+  thirdRichest: (g, s) => {
+    const air = g.players[s].air;
+    if (air < 2) return { rest: true };
+    return { wreck: richest(g).id, air: Math.ceil(air / 3) };
+  },
   restHeavy: (g, s) => {
     const air = g.players[s].air;
     return air < 6 ? { rest: true } : { wreck: biggest(g).id, air: 4 };
@@ -49,7 +75,7 @@ export function playGame(names, seed, strats, rnd) {
   return g;
 }
 
-function run(strats, n, seedBase) {
+export function run(strats, n, seedBase) {
   const wins = strats.map(() => 0);
   const rnd = mulberry(seedBase * 7919 + 1);
   for (let i = 0; i < n; i++) {

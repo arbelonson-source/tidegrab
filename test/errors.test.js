@@ -44,6 +44,7 @@ test("bad bodies say what is wrong", async () => {
   const form = await raw("/api/matches", { body: "name=E&seats=2", type: "application/x-www-form-urlencoded" });
   assert.equal(form.json.code, "form_body");
   assert.match(form.json.error, /JSON/);
+  assert.match(form.json.error, /\{"name":"E","seats":2\}/);
 });
 
 test("wrong method lists the allowed ones", async () => {
@@ -60,4 +61,15 @@ test("an unknown move field is named", async () => {
   assert.equal(r.json.code, "bad_move");
   assert.match(r.json.error, /"bid"/);
   assert.ok(Array.isArray(r.json.legal.wrecks));
+});
+
+test("odd requests get clean answers, not crashes", async () => {
+  for (const p of ["/%E0%A4%A", "/a%00b%"]) {
+    const r = await fetch(base + p);
+    assert.equal(r.status, 400, p);
+    assert.equal((await r.json()).code, "bad_request");
+  }
+  const big = await raw("/api/matches", { body: JSON.stringify({ name: "x".repeat(40000) }) });
+  assert.equal(big.status, 413);
+  assert.equal(big.json.code, "too_large");
 });

@@ -94,7 +94,49 @@ function settle(g, moves, seat, lam, mult, last) {
   let rival = -Infinity;
   for (let i = 0; i < pearls.length; i++) if (i !== seat) rival = Math.max(rival, val(i));
   const lead = val(seat) - rival;
-  return last ? (lead > 0 ? 10 : 0) + 0.1 * lead : lead + 0.5 * val(seat);
+  if (last) {
+    let rp = -Infinity, ra = 0;
+    for (let i = 0; i < pearls.length; i++) if (i !== seat && (pearls[i] > rp || (pearls[i] === rp && air[i] > ra))) { rp = pearls[i]; ra = air[i]; }
+    const win = pearls[seat] > rp ? 1 : pearls[seat] === rp ? (air[seat] > ra ? 1 : air[seat] === ra ? 0.5 : 0) : 0;
+    return win * 10 + 0.1 * (pearls[seat] - rp) + 0.01 * (air[seat] - ra);
+  }
+  return lead + 0.5 * val(seat);
+}
+
+// What a rival has actually done so far, read from the public tide history:
+// how much of their Air they put in, which wreck (by rank of pearls) they
+// went for, and when they rested.
+function rivalRecords(g, seat) {
+  const out = [];
+  let air = RULES.startAir;
+  for (const h of g.history) {
+    const m = h.moves.find((x) => x.seat === seat);
+    if (m) {
+      if (m.rest) out.push({ air, rest: true });
+      else {
+        const order = h.wrecks.slice().sort((x, y) => y.pearls - x.pearls || y.air - x.air);
+        const rank = Math.max(0, order.findIndex((w) => w.id === m.wreck));
+        out.push({ air, frac: m.air / Math.max(1, air), rank });
+      }
+    }
+    const st = h.standings.find((x) => x.seat === seat);
+    if (st) air = st.air;
+  }
+  return out;
+}
+
+function sampleRecorded(g, rival, recs, rnd) {
+  const A = rival.air;
+  let total = 0;
+  const ws = recs.map((r) => { const w = 1 / (1 + Math.abs(r.air - A)); total += w; return w; });
+  let x = rnd() * total, rec = recs[0];
+  for (let i = 0; i < recs.length; i++) { x -= ws[i]; if (x <= 0) { rec = recs[i]; break; } }
+  if (rec.rest || A < 1) return { rest: true };
+  const order = g.wrecks.slice().sort((p, q) => q.pearls - p.pearls || q.air - p.air);
+  const w = order[Math.min(rec.rank, order.length - 1)];
+  const jitter = rnd() < 0.3 ? (rnd() < 0.5 ? -1 : 1) : 0;
+  const air = Math.max(1, Math.min(A, Math.round(rec.frac * A) + jitter));
+  return { wreck: w.id, air };
 }
 
 function hardMove(g, seat, rnd, samples = 16) {
@@ -104,7 +146,22 @@ function hardMove(g, seat, rnd, samples = 16) {
   const last = g.tide >= g.tides;
   const cands = [{ rest: true }];
   for (const w of g.wrecks) for (let b = 1; b <= me.air; b++) cands.push({ wreck: w.id, air: b });
-  const worlds = Array.from({ length: samples }, () => g.players.map((p) => (p.seat === seat ? null : normalMove(g, p.seat, rnd))));
+  const recs = g.players.map((p) => (p.seat === seat ? null : rivalRecords(g, p.seat)));
+  const conf = recs.map((r) => {
+    if (!r) return 0;
+    const bids = r.filter((x) => !x.rest);
+    if (bids.length < 2) return 0;
+    const mean = bids.reduce((a, x) => a + x.frac, 0) / bids.length;
+    const sd = Math.sqrt(bids.reduce((a, x) => a + (x.frac - mean) ** 2, 0) / bids.length);
+    const steady = Math.max(0, 1 - sd * 16);
+    return (r.length / (r.length + 2)) * steady;
+  });
+  const worlds = Array.from({ length: samples }, () =>
+    g.players.map((p) => {
+      if (p.seat === seat) return null;
+      const r = recs[p.seat];
+      return r.length && rnd() < conf[p.seat] ? sampleRecorded(g, p, r, rnd) : normalMove(g, p.seat, rnd);
+    }));
   let best = cands[0], bestScore = -Infinity;
   for (const c of cands) {
     let s = rnd() * 1e-6;

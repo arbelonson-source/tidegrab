@@ -44,10 +44,13 @@ export function tideGain(g) {
   return eventOf(g) === "slack" ? 0 : RULES.tideGain;
 }
 
+export const OPENING_PEARLS = 6;
+
 function dealForecast(seed) {
   const f = Array(RULES.tides).fill("calm");
   const g = { rng: (seed ^ 0x9e3779b9) | 0 };
-  const slots = Array.from({ length: RULES.tides - 1 }, (_, i) => i);
+  // Tide 1 stays calm so a first match opens on the plain rules; events land on tides 2 to 7.
+  const slots = Array.from({ length: RULES.tides - 2 }, (_, i) => i + 1);
   for (let i = slots.length - 1; i > 0; i--) {
     const j = Math.floor(random(g) * (i + 1));
     [slots[i], slots[j]] = [slots[j], slots[i]];
@@ -114,6 +117,9 @@ export function createGame(names, seed) {
     forecast: dealForecast(seed),
   };
   refill(g);
+  // Open with something worth fighting over: the richest first wreck holds at least OPENING_PEARLS.
+  const top = g.wrecks.reduce((a, b) => (b.pearls > a.pearls ? b : a));
+  top.pearls = Math.max(top.pearls, OPENING_PEARLS);
   return g;
 }
 

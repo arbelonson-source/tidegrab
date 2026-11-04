@@ -150,12 +150,14 @@ export function startServer(opts = {}) {
   function readBody(req) {
     return new Promise((resolveBody, reject) => {
       const chunks = [];
-      let size = 0;
+      let size = 0, tooBig = false;
       req.on("data", (c) => {
         size += c.length;
+        // Over the limit: answer 413 and drop the rest; only cut the connection if a client keeps sending far past it.
         if (size > 16384) {
-          reject(new ApiError(413, "request body too large (limit 16 KB)"));
-          req.destroy();
+          if (!tooBig) reject(new ApiError(413, "request body too large (limit 16 KB)"));
+          tooBig = true;
+          if (size > 1048576) req.destroy();
         } else chunks.push(c);
       });
       req.on("end", () => {
@@ -183,7 +185,8 @@ export function startServer(opts = {}) {
   }
 
   function serveStatic(res, url) {
-    let p = decodeURIComponent(url.pathname);
+    let p;
+    try { p = decodeURIComponent(url.pathname); } catch { throw new ApiError(400, "bad URL encoding"); }
     if (/^\/(m|replay)\/[A-Za-z0-9]+\/?$/.test(p) || p === "/") p = "/index.html";
     else if (p === "/docs") p = "/docs.html";
     else if (p === "/README.md") return sendFile(res, path.join(ROOT, "README.md"));

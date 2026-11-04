@@ -2,7 +2,7 @@ import { RULES, EVENTS, eventOf, createGame, checkMove, normalizeMove, resolveTi
 import { chooseMove, LEVELS } from "../bots/brain.js";
 
 const BOT_NAMES = ["Coral", "Kelp", "Manta", "Brine", "Nacre", "Squall", "Abyss", "Tern"];
-const LOBBY_TTL = 900000;
+export const LOBBY_TTL = 900000;
 const MAX_WAITERS = 400;
 // A person who lets this many tides time out in a row is marked away, and the table
 // then waits only AWAY_WAIT_MS for them instead of the whole turn timer.
@@ -29,7 +29,8 @@ export const RULES_TEXT =
   "the most, the silt clouds the water and nobody takes it. All Air spent is gone, even if you lose. Unclaimed wrecks " +
   "stay and grow by 1 pearl, and every diver regains 1 Air each tide (up to 10). The eighth and final tide pays " +
   "double: every pearl won on it counts twice. After it, the diver with the most pearls wins; ties go to whoever " +
-  "has more Air left. A diver who does not move before the timer runs out rests. Four of the first seven tides " +
+  "has more Air left. A diver who does not move before the timer runs out rests. The first tide is always calm and " +
+  "opens with a wreck of at least 6 pearls. Four of tides 2 to 7 " +
   "bring a public event, always announced one tide ahead: Strong current (resting gives +3 Air), Rich seam (the new " +
   "wreck gets 3 extra pearls), Air pocket bloom (every wreck holds an air pocket) or Slack water (no Air comes back " +
   "at the end of the tide).";
@@ -76,6 +77,16 @@ const conflict = (code, message) => new ApiError(409, message, { code });
 const tokenError = (token) => new ApiError(401, token ? BAD_TOKEN : NO_TOKEN, { code: token ? "bad_token" : "no_token" });
 
 // Request bodies: one JSON object (or nothing). Each kind of mistake gets its own hint.
+// Turn "name=Ann&seats=2" into '{"name":"Ann","seats":2}' so the error shows the fix for this very request.
+function formAsJson(text) {
+  const out = {};
+  try {
+    for (const [k, v] of new URLSearchParams(text)) out[k.slice(0, 20)] = /^-?\d{1,6}$/.test(v) ? Number(v) : v === "true" ? true : v === "false" ? false : v.slice(0, 30);
+  } catch { /* fall through to the generic example */ }
+  const j = JSON.stringify(out);
+  return j !== "{}" && j.length <= 160 ? j : '{"wreck": 3, "air": 2}';
+}
+
 export function parseBody(text, contentType = "") {
   text = String(text || "").trim();
   if (!text) return {};
@@ -84,7 +95,7 @@ export function parseBody(text, contentType = "") {
     v = JSON.parse(text);
   } catch (e) {
     if (/form/i.test(contentType) || /^[\w.%-]+=[^{}]*$/.test(text))
-      throw new ApiError(400, 'the body looks like a form (key=value), send JSON instead, e.g. {"wreck": 3, "air": 2}', { code: "form_body" });
+      throw new ApiError(400, "the body looks like a form (key=value), send JSON instead, e.g. " + formAsJson(text), { code: "form_body" });
     throw new ApiError(400, "the body is not valid JSON (" + String(e.message).slice(0, 80) + ")", { code: "bad_json" });
   }
   if (Array.isArray(v)) throw new ApiError(400, "the body must be a JSON object, not an array", { code: "not_object" });
@@ -554,7 +565,8 @@ export class MatchRoom {
       return { status: 200, json: r.seats[seat] };
     }
     if (sub === "join") {
-      if (d.seats.every(Boolean)) throw d.status === "lobby" ? conflict("lobby_full", "the lobby is full") : conflict("match_running", "the match is full and already running, watch it instead");
+      if (d.status === "finished" || d.status === "expired") throw conflict("match_over", "the match is over, see /log or start a new one");
+    if (d.seats.every(Boolean)) throw d.status === "lobby" ? conflict("lobby_full", "the lobby is full") : conflict("match_running", "the match is full and already running, watch it instead");
       this.requireLobby();
       const seat = this.addSeat(cleanName(body.name, "Diver"), "human");
       if (d.seats.every(Boolean)) this.startMatch();

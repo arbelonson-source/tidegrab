@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { Registry, LIVE_SILENT_MS } from "../game/registry.js";
+import { LOBBY_TTL } from "../game/room.js";
 
 test("a late playing update cannot bring a finished match back to the live list", () => {
   const r = new Registry();
@@ -31,5 +32,18 @@ test("finished markers are cleared after a while", () => {
   r.update({ code: "MNPQR", version: 9, status: "finished" }, t);
   assert.equal(r.items.size, 1);
   r.prune(t + 11 * 60000);
+  assert.equal(r.items.size, 0);
+});
+
+test("a lobby leaves the open list once its 15 minutes are up, even if nobody says so", () => {
+  const r = new Registry();
+  r.reserve("STUVW", "10.0.0.4");
+  const t = r.items.get("STUVW").createdAt;
+  r.update({ code: "STUVW", version: 1, status: "lobby", host: "Ann", seats: 2, filled: 1, turnSeconds: 30, players: ["Ann", null] }, t);
+  const open = r.list(t + 90000).open;
+  assert.equal(open.length, 1);
+  assert.equal(open[0].waitingSeconds, 90);
+  assert.equal(r.list(t + LOBBY_TTL + 1000).open.length, 0);
+  r.prune(t + LOBBY_TTL + 61000);
   assert.equal(r.items.size, 0);
 });
