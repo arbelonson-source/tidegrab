@@ -498,7 +498,7 @@ function match(code) {
   const seenEmotes = new Set(), myEmotes = new Set();
   let revAnim = null, endHold = 0, coachTide = 0, srec = null, endFocused = false;
   const calm = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const ann = { tide: 0, lock: "", rv: 0, end: false, fresh: false };
+  const ann = { tide: 0, lock: "", rv: 0, end: false, fresh: false, status: "" };
   const root = h("div", {});
   mount(() => app.append(root));
   const tick = setInterval(updateTimer, 250);
@@ -550,14 +550,21 @@ function match(code) {
   }
 
   let endAt = 0, retry = 0;
+  // The in-flight state request. join() aborts it, so a reply asked for without the new seat token can't land afterwards.
+  let pollAc = null;
+  ac.signal.addEventListener("abort", () => pollAc && pollAc.abort());
   async function loop() {
     while (alive) {
+      const tk = token;
       try {
         // While reconnecting, ask for the state at once instead of long-polling, so the banner clears as soon as the network is back.
         const q = [recon ? "" : "wait=" + ver, token ? "" : "viewer=" + viewerId()].filter(Boolean).join("&");
-        const s = await api(`/matches/${code}` + (q ? "?" + q : ""), { token, signal: ac.signal });
+        pollAc = new AbortController();
+        const s = await api(`/matches/${code}` + (q ? "?" + q : ""), { token: tk, signal: pollAc.signal });
         retry = 0;
         if (!alive) return;
+        // Just took a seat while this was in flight: drop the seatless reply and ask again with the token.
+        if (tk !== token) continue;
         offset = s.serverTime ? s.serverTime - Date.now() : 0;
         ver = s.version;
         const first = !st;
@@ -570,7 +577,7 @@ function match(code) {
         }
         if (first && s.you && s.status !== "finished") autoHelp(s.status);
         recon = false;
-        if (!s.you && token) { store.del("tg:t:" + code); token = null; }
+        if (!s.you && tk) { store.del("tg:t:" + code); token = null; }
         if (s.lastReveal && s.lastReveal.tide !== logTide || (s.status === "finished" && first)) {
           logTide = s.lastReveal ? s.lastReveal.tide : 0;
           api(`/matches/${code}/log`).then((l) => { logRounds = l.rounds.map(norm); render(); }).catch(() => {});
@@ -585,6 +592,7 @@ function match(code) {
         }
       } catch (e) {
         if (!alive) return;
+        if (tk !== token) continue;
         if (e.status === 404) { root.replaceChildren(h("section", { class: "card center" }, h("h2", {}, "No such match"), h("p", {}, `There is no match with code ${code}.`), h("a", { class: "btn primary", href: "/" }, "Back home"))); return; }
         if (!recon) { recon = true; render(); }
         // Back off 1, 2, 4, 8 s, but retry right away when the browser says it is online again.
@@ -617,6 +625,12 @@ function match(code) {
       }
     }
     ann.fresh = true;
+    // The match starts by itself once the last seat fills; tell the people who were waiting.
+    if (ann.status === "lobby" && st.status === "playing") {
+      if (helpDlg && helpDlg.open) helpDlg.close();
+      if (st.you) { toast("Everyone is here. The match has started!"); sound.play("splash"); }
+    }
+    ann.status = st.status;
     if (st.status === "playing" && st.tide !== ann.tide) { ann.tide = st.tide; parts.push(`Tide ${st.tide} of ${st.tides} started, ${st.settings.turnSeconds} seconds`); if (EV_NAME[st.event]) parts.push(st.rules.eventText[st.event]); }
     const m = st.you && st.you.move;
     const lk = m ? st.tide + ":" + (m.rest ? "r" : m.wreck + "/" + m.air) : "";
@@ -697,7 +711,7 @@ function match(code) {
       try {
         store.set("tg:name", nameIn.value.trim());
         const r = await api(`/matches/${code}/join`, { body: { name: nameIn.value } });
-        token = r.token; store.set("tg:t:" + code, token); ver = 0; st = null; render();
+        token = r.token; store.set("tg:t:" + code, token); ver = 0; st = null; if (pollAc) pollAc.abort(); render();
       } catch (e) { toast(e.message); }
     };
     return [
