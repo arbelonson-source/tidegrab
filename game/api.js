@@ -53,6 +53,7 @@ const index = (o) => ({
     "POST /api/matches/CODE/move",
     "POST /api/matches/CODE/rematch",
     "GET /api/matches/CODE/log",
+    "POST /api/matches/CODE/emote",
   ],
 });
 

@@ -4,8 +4,17 @@ import { chooseMove, LEVELS } from "../bots/brain.js";
 const BOT_NAMES = ["Coral", "Kelp", "Manta", "Brine", "Nacre", "Squall", "Abyss", "Tern"];
 const LOBBY_TTL = 900000;
 const MAX_WAITERS = 400;
+const EMOTE_KEEP = 12;
+const EMOTE_SHOW = 8000;
+const EMOTE_GAP = 1500;
+const WATCHER_EMOTES = 5;
+const WATCHER_WINDOW = 5000;
+const MAX_VIEWERS = 300;
+const VIEWER_TTL = 40000;
 const NO_TOKEN = "missing or unknown token for this match (send it as 'Authorization: Bearer <token>' or a 'token' field)";
 let waiterTotal = 0;
+
+export const EMOTES = ["wave", "wow", "lol", "ouch", "gg", "pearl"];
 
 export const RULES_TEXT =
   "Two to four divers race through eight tides. Each tide, wrecks lie on the seabed, each holding pearls (the points) " +
@@ -93,6 +102,12 @@ export class MatchRoom {
     this.hooks = hooks;
     this.fast = !!opts.fast;
     this.waiters = new Set();
+    // Emotes and watcher counts live in memory only: they are cheap chatter, not game state.
+    this.emotes = [];
+    this.emoteSeq = 0;
+    this.lastEmote = new Map();
+    this.watcherEmotes = [];
+    this.viewers = new Map();
   }
 
   static create(code, params, hooks, opts = {}) {
@@ -324,7 +339,9 @@ export class MatchRoom {
       lastReveal: g && g.history.length ? g.history[g.history.length - 1] : null,
       winners: g && g.finished ? g.winners : null,
       rematch: d.rematch ? d.rematch.code : null,
-      rules: { text: RULES_TEXT, ...RULES, eventText: EVENTS },
+      watching: this.watching(now),
+      emotes: this.emotes.filter((e) => now - e.at < EMOTE_SHOW).map((e) => ({ ...e })),
+      rules: { text: RULES_TEXT, ...RULES, eventText: EVENTS, emotes: EMOTES },
     };
     if (seat !== null) {
       st.you = { seat, name: d.seats[seat].name, isHost: seat === 0, move: d.moves[seat] || null };
@@ -368,6 +385,41 @@ export class MatchRoom {
     for (const w of [...this.waiters]) w();
   }
 
+  seeViewer(id) {
+    const now = this.hooks.now();
+    if (!this.viewers.has(id) && this.viewers.size >= MAX_VIEWERS) this.watching(now);
+    if (this.viewers.has(id) || this.viewers.size < MAX_VIEWERS) this.viewers.set(id, now);
+  }
+
+  watching(now) {
+    for (const [id, at] of this.viewers) if (now - at > VIEWER_TTL) this.viewers.delete(id);
+    return this.viewers.size;
+  }
+
+  // Not saved: bumping the version wakes long-polls without spending a storage write.
+  // After a restart the saved version can be lower than a client's ?wait, which answers at once.
+  addEmote(seat, emote) {
+    const now = this.hooks.now();
+    if (seat === null) {
+      this.watcherEmotes = this.watcherEmotes.filter((t) => now - t < WATCHER_WINDOW);
+      if (this.watcherEmotes.length >= WATCHER_EMOTES) {
+        throw new ApiError(429, `watchers share ${WATCHER_EMOTES} emotes every ${WATCHER_WINDOW / 1000} s, try again shortly`, { retryAfterMs: WATCHER_WINDOW - (now - this.watcherEmotes[0]) });
+      }
+      this.watcherEmotes.push(now);
+    } else {
+      const last = this.lastEmote.get(seat);
+      if (last !== undefined && now - last < EMOTE_GAP) {
+        throw new ApiError(429, `one emote every ${EMOTE_GAP / 1000} s`, { retryAfterMs: EMOTE_GAP - (now - last) });
+      }
+      this.lastEmote.set(seat, now);
+    }
+    const e = { id: now.toString(36) + "-" + (this.emoteSeq++).toString(36), seat, name: seat === null ? "A watcher" : this.d.seats[seat].name, emote, at: now };
+    this.emotes = [...this.emotes, e].slice(-EMOTE_KEEP);
+    this.d.version += 1;
+    for (const w of [...this.waiters]) w();
+    return e;
+  }
+
   async handle(method, sub, body, token, query, origin) {
     try {
       return await this.dispatch(method, sub, body || {}, token, query || {}, origin);
@@ -391,7 +443,15 @@ export class MatchRoom {
       const wait = query.wait;
       if (wait !== undefined && wait !== null && wait !== "") {
         if (!/^\d{1,9}$/.test(String(wait))) throw new ApiError(400, "wait must be the version number you last saw, e.g. ?wait=12");
-        if (d.version <= Number(wait)) await this.waitForChange(Number(wait), 25000);
+      }
+      const viewer = query.viewer;
+      if (viewer !== undefined && viewer !== null && viewer !== "") {
+        if (!/^[A-Za-z0-9_-]{6,32}$/.test(String(viewer))) throw new ApiError(400, "viewer must be 6-32 letters, digits, _ or -, e.g. ?viewer=abc123");
+        if (seat === null) this.seeViewer(String(viewer));
+      }
+      if (wait !== undefined && wait !== null && wait !== "" && d.version === Number(wait)) {
+        await this.waitForChange(Number(wait), 25000);
+        if (seat === null && viewer) this.seeViewer(String(viewer));
       }
       return { status: 200, json: this.publicState(seat) };
     }
@@ -462,6 +522,17 @@ export class MatchRoom {
       const move = parseMove(body, () => this.legalFor(seat));
       const accepted = this.submitMove(seat, move);
       return { status: 200, json: { ok: true, tide: d.game.tide, move: accepted, version: d.version } };
+    }
+    if (sub === "emote") {
+      let seat = null;
+      if (token) {
+        seat = this.seatOf(token);
+        if (seat === null) throw new ApiError(401, NO_TOKEN);
+      }
+      const emote = body.emote;
+      if (!EMOTES.includes(emote)) throw new ApiError(400, `emote must be one of: ${EMOTES.join(", ")}`, { emotes: EMOTES });
+      const e = this.addEmote(seat, emote);
+      return { status: 200, json: { ok: true, emote: e, version: d.version } };
     }
     throw new ApiError(404, "unknown endpoint, see /docs");
   }

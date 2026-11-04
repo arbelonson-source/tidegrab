@@ -191,6 +191,14 @@ kbd { font: 0.8rem/1 ui-monospace, monospace; padding: 3px 6px; border-radius: 6
 .hstep p { margin: 2px 0 0; }
 .hstep b { display: block; }
 @media (max-width: 480px) { .hart { flex-basis: 72px; } .hart svg { width: 72px; height: 46px; } .st2 { font-size: 0.78rem; } .st2 th, .st2 td { padding: 5px 3px; } dialog.help { padding: 14px; } }
+.reactions { padding: 10px 16px; }
+.emotebar { gap: 6px; }
+.emo { min-width: 44px; min-height: 44px; padding: 4px 8px; font-size: 1.3rem; line-height: 1; }
+.emotes { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; min-height: 30px; align-items: center; }
+.emote { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--bg2); font-size: .9rem; }
+.emote.me { border-color: var(--gold); }
+.emote.pop { animation: rise .35s ease-out; }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
   .bubbles { display: none; }

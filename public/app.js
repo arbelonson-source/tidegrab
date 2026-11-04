@@ -23,6 +23,16 @@ const store = {
 };
 const myName = () => store.get("tg:name") || "";
 const tokenFor = (code) => store.get("tg:t:" + code);
+const EMOJI = { wave: "👋", wow: "😮", lol: "😂", ouch: "😬", gg: "🤝", pearl: "🦪" };
+const EMOTE_LABEL = { wave: "Wave", wow: "Wow", lol: "Laugh", ouch: "Ouch", gg: "Good game", pearl: "Pearl" };
+function viewerId() {
+  let v = store.get("tg:viewer");
+  if (!v || !/^[A-Za-z0-9_-]{6,32}$/.test(v)) {
+    v = Math.random().toString(36).slice(2, 12).padEnd(8, "0");
+    store.set("tg:viewer", v);
+  }
+  return v;
+}
 
 function say(msg) {
   const el = document.getElementById("sr");
@@ -399,6 +409,8 @@ function match(code) {
   let st = null, alive = true, ver = 0, offset = 0, token = tokenFor(code), logRounds = [], logTide = 0;
   let sel = null, airVal = 2, selTide = 0, busy = false, errMsg = "", animW = "", animR = -1;
   let recon = false, newReveal = false, lastPause = false;
+  let emoteWait = 0, emoteTimer = 0;
+  const seenEmotes = new Set(), myEmotes = new Set();
   const ann = { tide: 0, lock: "", rv: 0, end: false, fresh: false };
   const root = h("div", {});
   mount(() => app.append(root));
@@ -419,11 +431,36 @@ function match(code) {
     render();
   }
 
+  async function sendEmote(emote) {
+    if (Date.now() < emoteWait) return;
+    emoteWait = Date.now() + 1500;
+    render();
+    clearTimeout(emoteTimer);
+    emoteTimer = setTimeout(() => { if (alive) render(); }, 1550);
+    try { const r = await api(`/matches/${code}/emote`, { token, body: { emote } }); myEmotes.add(r.emote.id); if (alive) render(); } catch (e) { toast(e.status === 429 ? "Easy there: wait a moment before the next reaction." : e.message); }
+  }
+
+  function emotesView() {
+    const list = (st.emotes || []).filter((e) => now() - e.at < 8000);
+    const cool = Date.now() < emoteWait;
+    const chips = list.map((e) => {
+      const fresh = !seenEmotes.has(e.id);
+      seenEmotes.add(e.id);
+      const mine = (st.you && e.seat === st.you.seat) || myEmotes.has(e.id);
+      return h("span", { class: "emote" + (fresh ? " pop" : "") + (mine ? " me" : "") }, h("span", { "aria-hidden": "true" }, EMOJI[e.emote] || "•"), " ", mine ? "You" : e.name, h("span", { class: "sr" }, ": " + (EMOTE_LABEL[e.emote] || e.emote)));
+    });
+    return h("section", { class: "card reactions", "aria-label": "Reactions" },
+      h("div", { class: "row sb" },
+        h("div", { class: "row emotebar", role: "group", "aria-label": "Send a reaction" }, (st.rules.emotes || Object.keys(EMOJI)).map((k) => h("button", { class: "emo", "data-k": "emo-" + k, title: EMOTE_LABEL[k] || k, "aria-label": "React: " + (EMOTE_LABEL[k] || k), disabled: cool, onclick: () => sendEmote(k) }, EMOJI[k] || k))),
+        h("span", { class: "muted" }, st.watching ? `${st.watching} watching` : "")),
+      h("div", { class: "emotes" }, chips.length ? chips : h("span", { class: "muted" }, st.you ? "Reactions from the table show up here." : "You are watching. Reactions are open to everyone.")));
+  }
+
   let endAt = 0;
   async function loop() {
     while (alive) {
       try {
-        const s = await api(`/matches/${code}?wait=${ver}`, { token, signal: ac.signal });
+        const s = await api(`/matches/${code}?wait=${ver}` + (token ? "" : "&viewer=" + viewerId()), { token, signal: ac.signal });
         if (!alive) return;
         offset = s.serverTime ? s.serverTime - Date.now() : 0;
         ver = s.version;
@@ -506,6 +543,7 @@ function match(code) {
   }
 
   function updateTimer() {
+    if (st && st.emotes && st.emotes.some((e) => now() - e.at >= 8000)) { st.emotes = st.emotes.filter((e) => now() - e.at < 8000); render(); }
     const bar = root.querySelector(".timer");
     if (!bar || !st || st.status !== "playing") return;
     const t = now();
@@ -614,6 +652,7 @@ function match(code) {
       out.push(actionView());
     }
     if (rev && !pausing && !finished) out.push(rev);
+    out.push(emotesView());
     if (logRounds.length) out.push(h("section", { class: "card" }, h("h2", {}, "Match log"), h("ol", { class: "log", reversed: true }, [...logRounds].reverse().map((r) => h("li", {}, roundLine(r, names()))))));
     return out;
   }
