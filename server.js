@@ -2,7 +2,7 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { MatchRoom, ApiError } from "./game/room.js";
+import { MatchRoom, ApiError, parseBody, useMethod } from "./game/room.js";
 import { Registry, ipKey } from "./game/registry.js";
 import { route } from "./game/api.js";
 
@@ -159,14 +159,10 @@ export function startServer(opts = {}) {
         } else chunks.push(c);
       });
       req.on("end", () => {
-        const text = Buffer.concat(chunks).toString("utf8").trim();
-        if (!text) return resolveBody({});
         try {
-          const v = JSON.parse(text);
-          if (!v || typeof v !== "object" || Array.isArray(v)) throw new Error();
-          resolveBody(v);
-        } catch {
-          reject(new ApiError(400, "body must be a JSON object"));
+          resolveBody(parseBody(Buffer.concat(chunks).toString("utf8"), req.headers["content-type"] || ""));
+        } catch (e) {
+          reject(e);
         }
       });
       req.on("error", reject);
@@ -174,13 +170,13 @@ export function startServer(opts = {}) {
   }
 
   function send(res, status, obj) {
-    res.writeHead(status, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", ...CORS });
+    res.writeHead(status, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", ...CORS, ...(status === 405 && obj && obj.allow ? { allow: obj.allow } : {}) });
     res.end(status === 204 ? undefined : JSON.stringify(obj));
   }
 
   function sendFile(res, file) {
     fs.readFile(file, (err, buf) => {
-      if (err) return send(res, 404, { error: "not found" });
+      if (err) return send(res, 404, { error: "not found", code: "not_found" });
       res.writeHead(200, { "content-type": MIME[path.extname(file)] || "application/octet-stream", "cache-control": "no-cache" });
       res.end(buf);
     });
@@ -223,13 +219,13 @@ export function startServer(opts = {}) {
         rateLimit(ipKey(ip) || "?");
         return await api(req, res, url, ip === "?" ? null : ip);
       }
-      if (req.method !== "GET") throw new ApiError(405, "use GET");
+      if (req.method !== "GET") throw useMethod("GET");
       return serveStatic(res, url);
     } catch (e) {
       if (res.headersSent || res.destroyed) return;
       if (e instanceof ApiError) return send(res, e.status, { error: e.message, ...e.extra });
       console.error("handler error", e);
-      send(res, 500, { error: "internal error" });
+      send(res, 500, { error: "internal error", code: "internal" });
     }
   });
   server.requestTimeout = 60000;

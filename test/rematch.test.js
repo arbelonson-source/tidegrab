@@ -27,7 +27,9 @@ async function call(p, body, token) {
 test("rematch keeps the table together", async () => {
   const a = (await call("/api/matches", { name: "Ann", seats: 3, bots: 1 })).json;
   const b = (await call(`/api/matches/${a.code}/join`, { name: "Ben" })).json;
-  assert.equal((await call(`/api/matches/${a.code}/rematch`, {}, a.token)).status, 400);
+  const early = await call(`/api/matches/${a.code}/rematch`, {}, a.token);
+  assert.equal(early.status, 409);
+  assert.equal(early.json.code, "not_over");
   for (let i = 0; i < 200; i++) {
     const s = (await call(`/api/matches/${a.code}`, undefined, a.token)).json;
     if (s.status === "finished") break;

@@ -1,4 +1,4 @@
-import { MatchRoom, ApiError } from "./game/room.js";
+import { MatchRoom, ApiError, parseBody } from "./game/room.js";
 import { Registry, ipKey } from "./game/registry.js";
 import { route } from "./game/api.js";
 
@@ -12,7 +12,7 @@ const hits = new Map();
 function reply(status, json) {
   return new Response(status === 204 ? null : JSON.stringify(json), {
     status,
-    headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", ...CORS },
+    headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", ...CORS, ...(status === 405 && json && json.allow ? { allow: json.allow } : {}) },
   });
 }
 
@@ -30,14 +30,7 @@ async function readBody(request) {
   if (request.method !== "POST") return {};
   const text = await request.text();
   if (text.length > 16384) throw new ApiError(413, "request body too large (limit 16 KB)");
-  if (!text.trim()) return {};
-  try {
-    const v = JSON.parse(text);
-    if (!v || typeof v !== "object" || Array.isArray(v)) throw new Error();
-    return v;
-  } catch {
-    throw new ApiError(400, "body must be a JSON object");
-  }
+  return parseBody(text, request.headers.get("content-type") || "");
 }
 
 async function call(stub, path, payload) {
@@ -102,7 +95,7 @@ export default {
     } catch (e) {
       if (e instanceof ApiError) return reply(e.status, { error: e.message, ...e.extra });
       console.error("worker error", e);
-      return reply(500, { error: "internal error" });
+      return reply(500, { error: "internal error", code: "internal" });
     }
   },
 };
@@ -142,13 +135,13 @@ export class MatchDO {
     const path = new URL(request.url).pathname;
     const p = await request.json();
     if (path === "/init") {
-      if (this.room) return Response.json({ error: "code in use" }, { status: 409 });
+      if (this.room) return Response.json({ error: "code in use", code: "conflict" }, { status: 409 });
       const hooks = this.build({}).hooks;
       const { room, seat, token } = MatchRoom.create(p.code, p.params, hooks);
       this.room = room;
       return Response.json({ seat, token });
     }
-    if (!this.room) return Response.json({ error: "no such match: " + (p.code || "") }, { status: 404 });
+    if (!this.room) return Response.json({ error: "no such match: " + (p.code || ""), code: "not_found" }, { status: 404 });
     const out = await this.room.handle(p.method, p.sub, p.body, p.token, p.query, p.origin);
     return Response.json(out.json, { status: out.status });
   }
@@ -203,6 +196,6 @@ export class LobbyDO {
       await this.ctx.storage.put("r", this.reg.toJSON());
       return Response.json({ ok: true });
     }
-    return Response.json({ error: "not found" }, { status: 404 });
+    return Response.json({ error: "not found", code: "not_found" }, { status: 404 });
   }
 }

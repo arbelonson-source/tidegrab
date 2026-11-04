@@ -46,7 +46,11 @@ Matches are saved to `data/` and survive restarts. The same game code also runs 
 
 ## Agent API
 
-Base URL: `https://tidegrab.arbelonski.workers.dev` (or your own server). Bodies and responses are JSON and CORS is open. Python users: send your own `User-Agent` header, because Cloudflare rejects the default `Python-urllib` one with "error code: 1010". Machine-readable rules: `GET /api/rules`. This page is also served as plain markdown at `/README.md`, and `/llms.txt` is a one-page summary for language-model agents.
+Base URL: `https://tidegrab.arbelonski.workers.dev` (or your own server). Bodies and responses are JSON and CORS is open.
+
+> **Send a `User-Agent` header** (any name, such as `my-bot/1.0`). The site sits behind Cloudflare, which answers some default ones, including Python's `Python-urllib`, with an HTML page saying "error code: 1010".
+
+ Machine-readable rules: `GET /api/rules`. This page is also served as plain markdown at `/README.md`, and `/llms.txt` is a one-page summary for language-model agents.
 
 **Quick start:** `POST /api/matches` with `{"name":"me","seats":2,"bots":1}`, keep the `code` and `token`, then loop: `GET /api/matches/CODE?wait=VERSION` with `Authorization: Bearer TOKEN`, and when `status` is `playing` and `you.move` is null, `POST /api/matches/CODE/move` with `{"wreck": ID, "air": N}` or `{"rest": true}`.
 
@@ -76,7 +80,7 @@ curl -s -X POST $BASE/api/matches/CODE/move -H "Authorization: Bearer TOKEN" -d 
 
 **Tokens.** Every human seat gets its own token from create or join. Send it as `Authorization: Bearer <token>` (a `token` field in a JSON body also works). Bots need no token. Match codes are 5 letters and digits and are not case sensitive.
 
-**State fields.** `code`, `status` (`lobby`, `playing`, `finished`), `version` (goes up on every change, including other players locking in, so after a move keep long-polling until `tide` changes), `settings` (`seats, turnSeconds, botLevel`), `tide` (1-8) and `tides` (8), `serverTime`, `deadline` and `pauseUntil` (ms; after each tide there is a 4 s reveal pause and the turn timer starts when it ends, but moves are accepted during the pause too), `secondsLeft`, `host` (always seat 0), `seats` (a list of `{seat, name, kind}`, or `null` for an empty seat), `players` (`seat, name, kind, air, pearls, submitted`, `away` when a person let 2 tides in a row time out, and `form`: `dives, rests, avgAir, won` counted from the public reveals so far), `wrecks` (`id, pearls, air, age`: `air` is the air pocket, `age` is how many tides it went unclaimed), `event` and `nextEvent` (this tide's and the next tide's event: `calm`, `current`, `seam`, `bloom` or `slack`; the text for each is in `rules.eventText`, and bloom and seam are already applied to `wrecks`), `lastReveal` (the previous tide with everyone's choices and per-wreck `divers, winner, tie, gain`), `winners` (seats, when finished), `rematch` (the new match's code once someone asked for a rematch, else `null`), `watching` (watchers seen in the last 40 s), `emotes` (the last 8 s of emotes, oldest first: `id, seat, name, emote, at`, with `seat` `null` for a watcher; they are kept in memory only), `rules`, and with a token `you` (`seat, name, isHost, move`, and `legal: {rest, wrecks, minAir, maxAir}` only while playing; `wrecks` is the list of wreck ids you may dive to). Wreck ids keep increasing during a match, so always read them from `wrecks`.
+**State fields.** `code`, `status` (`lobby`, `playing`, `finished`, or `expired` when an idle lobby or match was closed; it is gone soon after), `version` (goes up on every change, including other players locking in, so after a move keep long-polling until `tide` changes), `settings` (`seats, turnSeconds, botLevel`), `tide` (1-8) and `tides` (8), `serverTime`, `deadline` and `pauseUntil` (ms; after each tide there is a 4 s reveal pause and the turn timer starts when it ends, but moves are accepted during the pause too), `secondsLeft`, `host` (always seat 0), `seats` (a list of `{seat, name, kind}`, or `null` for an empty seat), `players` (`seat, name, kind, air, pearls, submitted`, `away` when a person let 2 tides in a row time out, and `form`: `dives, rests, avgAir, won` counted from the public reveals so far), `wrecks` (`id, pearls, air, age`: `air` is the air pocket, `age` is how many tides it went unclaimed), `event` and `nextEvent` (this tide's and the next tide's event: `calm`, `current`, `seam`, `bloom` or `slack`; the text for each is in `rules.eventText`, and bloom and seam are already applied to `wrecks`), `lastReveal` (the previous tide with everyone's choices and per-wreck `divers, winner, tie, gain`), `winners` (seats, when finished), `rematch` (the new match's code once someone asked for a rematch, else `null`), `watching` (watchers seen in the last 40 s), `emotes` (the last 8 s of emotes, oldest first: `id, seat, name, emote, at`, with `seat` `null` for a watcher; they are kept in memory only), `rules`, and with a token `you` (`seat, name, isHost, move`, and `legal: {rest, wrecks, minAir, maxAir}` only while playing; `wrecks` is the list of wreck ids you may dive to). Wreck ids keep increasing during a match, so always read them from `wrecks`.
 
 **Example state** (3 seats, start of tide 2, seen by seat 0 with its token; `rules` left out). In tide 1 seat 0 spent 3 Air on wreck 1 and beat seat 2's 1 Air, so it took 5 pearls; nobody dived to wreck 2, so it stays and grows to 4 pearls, and a new wreck 3 surfaced.
 
@@ -110,7 +114,7 @@ curl -s -X POST $BASE/api/matches/CODE/move -H "Authorization: Bearer TOKEN" -d 
 
 Here `you.move` is `null` and `status` is `playing`, so it is your turn: send `{"wreck": 3, "air": 2}` (any id from `legal.wrecks`, Air from `minAir` to `maxAir`) or `{"rest": true}`. `players[].submitted` shows who has already locked in, never what they chose. Then long-poll with `?wait=5`; the reply comes back as soon as anything changes, and once `tide` is 3 the outcome of tide 2 is in `lastReveal`.
 
-**Errors.** Errors are `{"error": "..."}` with an HTTP status: 400 for a bad request or an illegal move (with the `legal` options attached), 401 for a missing or wrong token, 403 for host-only actions, 404 for an unknown match, 405 for the wrong method, 413 for a body over 16 KB, 429 for more than 300 requests in 10 s from one address or more than 5 open lobbies or 12 running matches from one address, and 503 when the server is full or too many long-polls are waiting (retry without `wait`). Names are trimmed to 20 characters. Wreck ids and air sent as numeric strings (`"2"`) are accepted, and an unknown field such as `bid` is named in the error.
+**Errors.** Errors are `{"error": "...", "code": "..."}` with an HTTP status. The `error` text is for people and may change; `code` is stable, so branch on that. 400 for a bad request (`bad_json`, `not_object`, `form_body` for a form instead of JSON, `bad_request`) or an illegal move (`bad_move`, with the `legal` options attached), 401 for a missing token (`no_token`) or one that is not a seat in this match (`bad_token`), 403 for host-only actions (`not_host`), 404 for an unknown match (`not_found`), 405 for the wrong method (`wrong_method`, with an `Allow` header), 409 when the match is in the wrong state for the request (`lobby_full`, `already_started`, `no_empty_seats`, `match_running`, `not_started`, `match_over`, `not_over`), 413 for a body over 16 KB (`too_large`), 429 (`rate_limited`) for more than 300 requests in 10 s from one address or more than 5 open lobbies or 12 running matches from one address, and 503 (`busy`) when the server is full or too many long-polls are waiting (retry without `wait`). Names are trimmed to 20 characters. Wreck ids and air sent as numeric strings (`"2"`) are accepted, and an unknown field such as `bid` is named in the error.
 
 **Timing.** A player who does not move before the timer runs out rests. A person who lets 2 tides in a row run out is marked away, and from then on the table waits only 8 seconds for them each tide; any move brings them back. Lobbies nobody starts close after 15 minutes. Finished matches and their replays are kept for a day.
 
@@ -128,10 +132,14 @@ m = call("/api/matches", {"name": "me", "seats": 2, "bots": 1})
 v = 0
 while True:
     s = call(f"/api/matches/{m['code']}?wait={v}", tok=m["token"]); v = s["version"]
-    if s["status"] == "finished": break
-    if s["status"] == "playing" and not s["you"]["move"]:
-        w, a = s["wrecks"][0]["id"], min(2, s["you"]["legal"]["maxAir"])
-        call(f"/api/matches/{m['code']}/move", {"wreck": w, "air": a} if a else {"rest": True}, m["token"])
+    if s["status"] in ("finished", "expired"): break
+    legal = s["you"].get("legal")
+    if s["status"] == "playing" and not s["you"]["move"] and legal:
+        if legal["wrecks"] and legal["maxAir"] >= 1:
+            move = {"wreck": legal["wrecks"][0], "air": min(2, legal["maxAir"])}
+        else:
+            move = {"rest": True}
+        call(f"/api/matches/{m['code']}/move", move, m["token"])
 ```
 
 Sample bot: `python3 bots/sample_bot.py` creates a match against a house bot and plays it (stdlib only). To join a friend's match: `python3 bots/sample_bot.py --code ABCDE --name MyBot`. Use `--server http://localhost:8790` for a local server. The same bot in JavaScript (Node 18+, no packages): `node bots/sample_bot.mjs`, with the same options.

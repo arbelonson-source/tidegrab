@@ -2,15 +2,21 @@
 
 > A turn-based secret-bid diving game for 2 to 4 players. Humans play in the browser, agents play over a small HTTP/JSON API. No login, no install; a match takes about 5 minutes and bots fill empty seats.
 
-Rules: 8 tides. Each tide every diver secretly either dives to one wreck spending at least 1 Air on it, or rests for +2 Air. At each wreck the single highest bid takes the pearls; a tie for highest means nobody does. Spent Air is lost either way. Unclaimed wrecks grow by 1 pearl, everyone regains 1 Air per tide (max 10), you start with 5. The final tide pays double. Most pearls wins, ties go to more Air left. No move before the timer means rest.
+Send your own User-Agent header, for example `User-Agent: my-bot/1.0`. Cloudflare rejects some default ones (Python-urllib's gets an HTML page saying "error code: 1010").
+
+Rules: 8 tides. Each tide every diver secretly either dives to one wreck spending at least 1 Air on it, or rests for +2 Air. At each wreck the single highest bid takes the pearls; a tie for highest means nobody does. Spent Air is lost either way. Unclaimed wrecks grow by 1 pearl, everyone regains 1 Air per tide (max 10), you start with 5. Four of tides 1-7 have a public event (`event`, announced a tide ahead as `nextEvent`; texts in /api/rules `eventText`). The final tide has no event (`event` is null) and pays double: the `gain` of each wreck is already doubled. Most pearls wins, ties go to more Air left. No move before the timer means rest.
 
 Agent loop:
-1. POST /api/matches {"name":"me","seats":2,"bots":1} -> {code, seat, token}
-2. GET /api/matches/CODE?wait=VERSION with header Authorization: Bearer TOKEN (long-poll; returns when version > VERSION)
-3. When status is "playing" and you.move is null: POST /api/matches/CODE/move {"wreck": ID, "air": N} or {"rest": true}, choosing ID from you.legal.wrecks and N from you.legal.minAir..maxAir
-4. Repeat 2-3 until status is "finished"; winners lists the winning seats
+1. POST /api/matches {"name":"me","seats":2,"bots":1} -> {code, seat, token}. Or join someone's lobby: POST /api/matches/CODE/join {"name":"me"}. GET /api/matches lists open lobbies and live matches.
+2. GET /api/matches/CODE?wait=VERSION with header Authorization: Bearer TOKEN. Pass the `version` from the last state you got (0 the first time); it answers as soon as the version is different, or after about 25 s with the same state.
+3. When status is "playing" and you.move is null: POST /api/matches/CODE/move {"wreck": ID, "air": N} or {"rest": true}, choosing ID from you.legal.wrecks and N from you.legal.minAir..maxAir. You may send a move while the last tide's reveal is still showing (pauseUntil); it counts for the new tide. You can change your move until the tide resolves.
+4. Repeat 2-3 until status is "finished" (winners lists the winning seats) or "expired" (an idle match was closed).
 
-Send your own User-Agent header (Cloudflare rejects Python-urllib's default with "error code: 1010").
+The token can also go in the JSON body as "token" instead of the header.
+
+Useful state fields: players[].form (dives, rests, avgAir, won) shows how each opponent has played; players[].away is true for a person who timed out twice in a row; lastReveal has every move and the standings after the tide.
+
+Errors are JSON {"error": "...", "code": "..."}; branch on `code`. 400 bad_move also has `legal`. 401 is no_token or bad_token. 409 means the match is in the wrong state (for example not_started, match_over). 429 means slow down.
 
 ## Docs
 

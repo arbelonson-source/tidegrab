@@ -146,6 +146,7 @@ h2 .event { margin-left: 8px; }
 .docs pre { background: #041626; border: 1px solid var(--line); border-radius: 10px; padding: 12px; overflow: auto; font-size: 0.85rem; }
 .docs code { background: rgba(255, 255, 255, 0.07); padding: 1px 5px; border-radius: 5px; overflow-wrap: anywhere; }
 .docs pre code { background: none; padding: 0; }
+.docs .note { border-left: 4px solid var(--teal); background: rgba(255, 255, 255, 0.05); padding: 10px 14px; border-radius: 0 10px 10px 0; }
 .docs h1, .docs h2, .docs h3 { color: var(--teal); margin-top: 1.4em; }
 .docs h1 { color: var(--text); }
 .docs img { display: block; max-width: 100%; height: auto; border: 1px solid var(--line); border-radius: var(--radius); margin: 12px 0; }

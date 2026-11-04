@@ -53,6 +53,9 @@ def main():
             print("final:", ", ".join("%s %d" % (p["name"], p["pearls"]) for p in s["players"]))
             print("winners:", [s["players"][w]["name"] for w in s["winners"]])
             return
+        if s["status"] == "expired":
+            print("the match was closed for being idle")
+            return
         if s["status"] == "playing" and not s["you"]["move"]:
             call(base, "/api/matches/%s/move" % code, choose(s), token)
 

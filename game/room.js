@@ -15,7 +15,8 @@ const WATCHER_EMOTES = 5;
 const WATCHER_WINDOW = 5000;
 const MAX_VIEWERS = 300;
 const VIEWER_TTL = 40000;
-const NO_TOKEN = "missing or unknown token for this match (send it as 'Authorization: Bearer <token>' or a 'token' field)";
+const NO_TOKEN = "this needs your seat token: send it as 'Authorization: Bearer <token>' or as a 'token' field in the JSON body";
+const BAD_TOKEN = "that token does not hold a seat in this match (tokens belong to one match: use the one you got when you created or joined it)";
 let waiterTotal = 0;
 
 export const EMOTES = ["wave", "wow", "lol", "ouch", "gg", "pearl"];
@@ -33,12 +34,15 @@ export const RULES_TEXT =
   "wreck gets 3 extra pearls), Air pocket bloom (every wreck holds an air pocket) or Slack water (no Air comes back " +
   "at the end of the tide).";
 
+// Everything a bot needs to know about the rules, served at /api/rules, in each state and in the replay log.
+export const RULES_INFO = Object.freeze({ text: RULES_TEXT, ...RULES, eventText: EVENTS, emotes: EMOTES });
+
 const MOVE_SHAPE = 'send {"wreck": <id>, "air": <n>} or {"rest": true}';
 
 function parseMove(body, legal) {
   const has = (k) => body[k] !== undefined && body[k] !== null;
   const fail = (msg) => {
-    throw new ApiError(400, msg, { legal: legal() });
+    throw new ApiError(400, msg, { code: "bad_move", legal: legal() });
   };
   const odd = Object.keys(body).filter((k) => !["wreck", "air", "rest", "token"].includes(k));
   const rest = body.rest === false ? undefined : body.rest;
@@ -52,12 +56,40 @@ function parseMove(body, legal) {
   return { wreck: num(body.wreck), air: num(body.air) };
 }
 
+// Every error carries a stable `code` so bots can branch on it instead of the wording.
+const STATUS_CODES = { 400: "bad_request", 401: "no_token", 403: "forbidden", 404: "not_found", 405: "wrong_method", 409: "conflict", 413: "too_large", 429: "rate_limited", 503: "busy" };
+
 export class ApiError extends Error {
   constructor(status, message, extra = {}) {
     super(message);
     this.status = status;
-    this.extra = extra;
+    this.extra = { code: STATUS_CODES[status] || "error", ...extra };
   }
+}
+
+// 405 with the methods that do work; the JSON "allow" field becomes the Allow header.
+export const useMethod = (allow) => new ApiError(405, "use " + allow.split(", ").join(" or "), { allow, code: "wrong_method" });
+
+// The match is in the wrong state for this request (409), with a stable code for bots.
+const conflict = (code, message) => new ApiError(409, message, { code });
+
+const tokenError = (token) => new ApiError(401, token ? BAD_TOKEN : NO_TOKEN, { code: token ? "bad_token" : "no_token" });
+
+// Request bodies: one JSON object (or nothing). Each kind of mistake gets its own hint.
+export function parseBody(text, contentType = "") {
+  text = String(text || "").trim();
+  if (!text) return {};
+  let v;
+  try {
+    v = JSON.parse(text);
+  } catch (e) {
+    if (/form/i.test(contentType) || /^[\w.%-]+=[^{}]*$/.test(text))
+      throw new ApiError(400, 'the body looks like a form (key=value), send JSON instead, e.g. {"wreck": 3, "air": 2}', { code: "form_body" });
+    throw new ApiError(400, "the body is not valid JSON (" + String(e.message).slice(0, 80) + ")", { code: "bad_json" });
+  }
+  if (Array.isArray(v)) throw new ApiError(400, "the body must be a JSON object, not an array", { code: "not_object" });
+  if (!v || typeof v !== "object") throw new ApiError(400, 'the body must be a JSON object, e.g. {"rest": true}', { code: "not_object" });
+  return v;
 }
 
 export function cleanName(raw, fallback) {
@@ -265,7 +297,7 @@ export class MatchRoom {
   addSeat(name, kind) {
     const d = this.d;
     const i = d.seats.findIndex((s) => !s);
-    if (i < 0) throw new ApiError(400, "the lobby is full");
+    if (i < 0) throw conflict("lobby_full", "the lobby is full");
     let finalName = name;
     const taken = new Set(d.seats.filter(Boolean).map((s) => s.name));
     for (let n = 2; taken.has(finalName); n++) finalName = `${name.slice(0, 17)} ${n}`;
@@ -306,7 +338,7 @@ export class MatchRoom {
   submitMove(seat, move) {
     const d = this.d;
     const err = checkMove(d.game, seat, move);
-    if (err) throw new ApiError(400, err, { legal: this.legalFor(seat) });
+    if (err) throw new ApiError(400, err, { code: "bad_move", legal: this.legalFor(seat) });
     d.moves[seat] = normalizeMove(move);
     if (d.missed) delete d.missed[seat];
     this.commit();
@@ -374,7 +406,7 @@ export class MatchRoom {
       rematch: d.rematch ? d.rematch.code : null,
       watching: this.watching(now),
       emotes: this.emotes.filter((e) => now - e.at < EMOTE_SHOW).map((e) => ({ ...e })),
-      rules: { text: RULES_TEXT, ...RULES, eventText: EVENTS, emotes: EMOTES },
+      rules: RULES_INFO,
     };
     if (seat !== null) {
       st.you = { seat, name: d.seats[seat].name, isHost: seat === 0, move: d.moves[seat] || null };
@@ -391,12 +423,12 @@ export class MatchRoom {
 
   requireHost(token) {
     const seat = this.seatOf(token);
-    if (seat === null) throw new ApiError(401, NO_TOKEN);
-    if (seat !== 0) throw new ApiError(403, "only the host (seat 0) can do that");
+    if (seat === null) throw tokenError(token);
+    if (seat !== 0) throw new ApiError(403, "only the host (seat 0) can do that", { code: "not_host" });
   }
 
   requireLobby() {
-    if (this.d.status !== "lobby") throw new ApiError(400, "this match has already started (it starts by itself once every seat is filled)");
+    if (this.d.status !== "lobby") throw conflict("already_started", "this match has already started (it starts by itself once every seat is filled)");
   }
 
   waitForChange(version, ms) {
@@ -467,11 +499,11 @@ export class MatchRoom {
     const d = this.d;
     if (d.status === "expired") throw new ApiError(404, "no such match: " + d.code);
     if (sub === undefined) {
-      if (method !== "GET") throw new ApiError(405, "use GET");
+      if (method !== "GET") throw useMethod("GET");
       let seat = null;
       if (token) {
         seat = this.seatOf(token);
-        if (seat === null) throw new ApiError(401, NO_TOKEN);
+        if (seat === null) throw tokenError(token);
       }
       const wait = query.wait;
       if (wait !== undefined && wait !== null && wait !== "") {
@@ -496,7 +528,7 @@ export class MatchRoom {
           status: d.status,
           seed: d.status === "finished" ? d.seed : null,
           settings: d.settings,
-          rules: { ...RULES, eventText: EVENTS },
+          rules: RULES_INFO,
           names: d.seats.map((s) => s && s.name),
           kinds: d.seats.map((s) => s && s.kind),
           rounds: d.rounds,
@@ -504,11 +536,11 @@ export class MatchRoom {
         },
       };
     }
-    if (method !== "POST") throw new ApiError(405, "use POST");
+    if (method !== "POST") throw useMethod("POST");
     if (sub === "rematch:info" || sub === "rematch:set") {
       const seat = this.seatOf(token);
-      if (seat === null) throw new ApiError(401, NO_TOKEN);
-      if (d.status !== "finished") throw new ApiError(400, "the match is not over yet");
+      if (seat === null) throw tokenError(token);
+      if (d.status !== "finished") throw conflict("not_over", "the match is not over yet");
       const r = d.rematch || (d.rematch = { code: null, seats: {} });
       if (sub === "rematch:info") {
         if (r.seats[seat]) return { status: 200, json: { mine: r.seats[seat] } };
@@ -522,7 +554,7 @@ export class MatchRoom {
       return { status: 200, json: r.seats[seat] };
     }
     if (sub === "join") {
-      if (d.seats.every(Boolean)) throw new ApiError(400, d.status === "lobby" ? "the lobby is full" : "the match is full and already running, watch it instead");
+      if (d.seats.every(Boolean)) throw d.status === "lobby" ? conflict("lobby_full", "the lobby is full") : conflict("match_running", "the match is full and already running, watch it instead");
       this.requireLobby();
       const seat = this.addSeat(cleanName(body.name, "Diver"), "human");
       if (d.seats.every(Boolean)) this.startMatch();
@@ -535,7 +567,7 @@ export class MatchRoom {
       const free = d.seats.filter((s) => !s).length;
       const n = body.count === undefined ? 1 : body.count;
       if (!Number.isInteger(n) || n < 1) throw new ApiError(400, "count must be a whole number, at least 1");
-      if (free === 0) throw new ApiError(400, "no empty seats");
+      if (free === 0) throw conflict("no_empty_seats", "no empty seats");
       for (let i = 0; i < Math.min(n, free); i++) this.addBot();
       if (d.seats.every(Boolean)) this.startMatch();
       else this.commit(true);
@@ -550,17 +582,20 @@ export class MatchRoom {
     }
     if (sub === "move") {
       const seat = this.seatOf(token);
-      if (seat === null) throw new ApiError(401, NO_TOKEN);
-      if (d.status !== "playing") throw new ApiError(400, d.status === "lobby" ? "the match has not started yet: wait until status is \"playing\" (the host starts it, or it starts when every seat is filled)" : "the match is over");
+      if (seat === null) throw tokenError(token);
+      if (d.status !== "playing") throw d.status === "lobby" ? conflict("not_started", "the match has not started yet: wait until status is \"playing\" (the host starts it, or it starts when every seat is filled)") : conflict("match_over", "the match is over");
       const move = parseMove(body, () => this.legalFor(seat));
-      const accepted = this.submitMove(seat, move);
+      const odd = Object.keys(body).filter((k) => !["wreck", "air", "rest", "token"].includes(k));
+    const err = checkMove(d.game, seat, move);
+    if (err) throw new ApiError(400, err + (odd.length ? ` (unknown field "${odd[0]}" was ignored: ${MOVE_SHAPE})` : ""), { code: "bad_move", legal: this.legalFor(seat) });
+    const accepted = this.submitMove(seat, move);
       return { status: 200, json: { ok: true, tide: d.game.tide, move: accepted, version: d.version } };
     }
     if (sub === "emote") {
       let seat = null;
       if (token) {
         seat = this.seatOf(token);
-        if (seat === null) throw new ApiError(401, NO_TOKEN);
+        if (seat === null) throw tokenError(token);
       }
       const emote = body.emote;
       if (!EMOTES.includes(emote)) throw new ApiError(400, `emote must be one of: ${EMOTES.join(", ")}`, { emotes: EMOTES });

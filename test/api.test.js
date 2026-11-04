@@ -121,7 +121,8 @@ test("move shapes: rest:false dives, mixed or empty moves explain themselves", a
 test("joining a full running match says so", async () => {
   const { json } = await call("/api/matches", { name: "T", seats: 2, bots: 1 });
   const j = await call(`/api/matches/${json.code}/join`, { name: "Late" });
-  assert.equal(j.status, 400);
+  assert.equal(j.status, 409);
+  assert.equal(j.json.code, "match_running");
   assert.match(j.json.error, /full/);
   const nf = await call("/api/matches/QQQQQ");
   assert.match(nf.json.error, /QQQQQ/);

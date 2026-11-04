@@ -47,5 +47,9 @@ for (;;) {
     console.log("winners:", s.winners.map((w) => s.players[w].name));
     break;
   }
+  if (s.status === "expired") {
+    console.log("the match was closed for being idle");
+    break;
+  }
   if (s.status === "playing" && !s.you.move) await call(`/api/matches/${code}/move`, choose(s), token);
 }

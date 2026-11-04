@@ -172,7 +172,7 @@ function autoHelp(status) {
   try { if (store.get("tg:help")) return; } catch {}
   store.set("tg:help", "1");
   if (status === "lobby") openHelp(app);
-  else toast("New here? Press ? (top of the board) for how to play.");
+  else toast("New here? Tap the ? button at the top of the board for how to play.");
 }
 
 function matchStats(rounds, players) {
@@ -568,7 +568,7 @@ function match(code) {
     const secs = Math.ceil(left / 1000);
     if (lab) lab.classList.toggle("low", !pausing && left <= 5000);
     if (!pausing && left > 0 && left <= 5000 && st.you && st.you.legal && !st.you.move) sound.tick(st.tide * 10 + secs);
-    if (lab) lab.textContent = pausing ? "Resolving…" : `${secs} second${secs === 1 ? "" : "s"} left`;
+    if (lab) lab.textContent = pausing ? (st.lastReveal ? "Resolving…" : "Get ready…") : `${secs} second${secs === 1 ? "" : "s"} left`;
   }
 
   function lobbyView() {

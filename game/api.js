@@ -1,26 +1,25 @@
-import { RULES, EVENTS } from "../engine.js";
-import { RULES_TEXT, ApiError, parseCreate } from "./room.js";
+import { RULES_INFO, ApiError, parseCreate, useMethod } from "./room.js";
 import { openapi } from "./openapi.js";
 
 // store: { list(), create(params) -> {code, seat, token}, match(code) -> {handle(...)}|null }
 export async function route(store, req) {
   const { method, parts, body, token, query, origin, ip } = req;
   if (!parts.length) {
-    if (method !== "GET") throw new ApiError(405, "use GET");
+    if (method !== "GET") throw useMethod("GET");
     return { status: 200, json: index(origin) };
   }
   if (parts[0] === "rules") {
-    if (method !== "GET") throw new ApiError(405, "use GET");
-    return { status: 200, json: { ...RULES, eventText: EVENTS, text: RULES_TEXT } };
+    if (method !== "GET") throw useMethod("GET");
+    return { status: 200, json: RULES_INFO };
   }
   if (parts[0] === "openapi.json" && parts.length === 1) {
-    if (method !== "GET") throw new ApiError(405, "use GET");
+    if (method !== "GET") throw useMethod("GET");
     return { status: 200, json: openapi(origin) };
   }
   if (parts[0] !== "matches") throw new ApiError(404, "unknown endpoint, see /docs");
   if (parts.length === 1) {
     if (method === "GET") return { status: 200, json: await store.list() };
-    if (method !== "POST") throw new ApiError(405, "use GET or POST");
+    if (method !== "POST") throw useMethod("GET, POST");
     const made = await store.create(parseCreate(body), ip);
     return { status: 200, json: { code: made.code, seat: made.seat, token: made.token, url: `${origin}/m/${made.code}` } };
   }
@@ -29,7 +28,7 @@ export async function route(store, req) {
   const room = await store.match(code);
   if (!room) throw new ApiError(404, "no such match: " + code);
   if (parts[2] === "rematch") {
-    if (method !== "POST") throw new ApiError(405, "use POST");
+    if (method !== "POST") throw useMethod("POST");
     return { status: 200, json: await rematch(store, room, token, origin, ip) };
   }
   return room.handle(method, parts[2], body, token, query, origin);
@@ -58,7 +57,10 @@ const index = (o) => ({
 });
 
 const ok = (r) => {
-  if (r.status !== 200) throw new ApiError(r.status, r.json.error);
+  if (r.status !== 200) {
+    const { error, ...extra } = r.json;
+    throw new ApiError(r.status, error, extra);
+  }
   return r.json;
 };
 
