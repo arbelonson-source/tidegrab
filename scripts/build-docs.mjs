@@ -7,6 +7,7 @@ const inline = (s) =>
   esc(s)
     .replace(/`([^`]+)`/g, (_, c) => "<code>" + c.replace(/\\\|/g, "|") + "</code>")
     .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
+    .replace(/!\[([^\]]*)\]\((?:public\/)?([^)]+)\)/g, '<img src="/$2" alt="$1" width="1000" height="1075" loading="lazy">')
     .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>')
     .replace(/(^|[\s(])(https:\/\/[^\s)<]+)/g, '$1<a href="$2">$2</a>');
 const cells = (line) => line.replace(/^\||\|$/g, "").split(/(?<!\\)\|/).map((c) => c.trim());

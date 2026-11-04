@@ -16,6 +16,7 @@ const MIME = {
   ".md": "text/markdown; charset=utf-8",
   ".txt": "text/plain; charset=utf-8",
   ".png": "image/png",
+  ".webp": "image/webp",
   ".ico": "image/x-icon",
 };
 const KEEP_FINISHED_MS = 15 * 60 * 1000;
