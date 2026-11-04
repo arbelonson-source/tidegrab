@@ -4,13 +4,15 @@ A small turn-based strategy game of secret bids for 2 to 4 players, humans in th
 
 **Play now: https://tidegrab.arbelonski.workers.dev** (no install, no login). Source: https://github.com/arbelonson-source/tidegrab
 
+![A match in progress: tide 5 of 8 under an air pocket bloom, with the next tide's rich seam announced, three divers' Air and pearls, two wrecks, the move controls and the previous tide's reveal](public/screenshot.webp)
+
 ## Rules in 30 seconds
 
 - Two to four divers, eight tides. Most pearls at the end wins.
 - Each tide, in secret, either dive to one wreck and spend some of your Air on it, or rest to gain 2 Air.
 - At each wreck the diver who spent the most Air takes its pearls. A tie for the most means nobody does, and spent Air is gone either way.
 - Wrecks nobody claims grow, and the last tide pays double, so saving Air for the right moment matters.
-- Four tides bring a public event (strong current, rich seam, air pocket bloom, slack water), always announced one tide ahead.
+- Four tides bring a public event, one each of strong current, rich seam, air pocket bloom and slack water, always announced one tide ahead.
 
 **Writing a bot?** Three calls are enough: create a match, long-poll its state, send a move. See [Agent API](#agent-api) below, or run `python3 bots/sample_bot.py` (or `node bots/sample_bot.mjs`) to watch one play a full match.
 
@@ -18,7 +20,7 @@ A small turn-based strategy game of secret bids for 2 to 4 players, humans in th
 
 Two to four divers race through eight tides. Each tide, wrecks lie on the seabed (one fewer than the number of divers, at least two), each holding pearls (the points) and sometimes an air pocket (+3 Air for whoever claims it). In secret, every diver either dives to one wreck, spending at least 1 Air on it, or rests to gain 2 Air. When everyone has chosen, the choices are revealed: at each wreck the single diver who spent the most Air takes its pearls and air pocket, but if two or more divers tie for the most, nobody takes it. All Air spent on a dive is gone, even if you lose. Wrecks nobody claimed stay and grow by 1 pearl. After every tide each diver regains 1 Air (maximum 10). You start with 5 Air. The eighth and final tide pays double: every pearl won on it counts twice. After it, the diver with the most pearls wins; ties go to the diver with more Air left. If you do not move before the timer runs out, you rest.
 
-**Tide events.** Four of the first seven tides bring a public event, dealt from the match seed and always shown one tide ahead (the final tide is never an event, it already pays double):
+**Tide events.** Four of the first seven tides bring a public event, each of the four below exactly once, in an order dealt from the match seed and always shown one tide ahead (the final tide is never an event, it already pays double):
 
 - **Strong current:** resting this tide gives +3 Air instead of +2.
 - **Rich seam:** the new wreck that appears this tide starts with 3 extra pearls.
@@ -141,15 +143,15 @@ Every tide is a bet: diving big wins a wreck but burns Air you need later, tying
 
 | Strategy | 2 players | 3 players | 4 players |
 |---|---|---|---|
-| hard bot | 69.0 | 62.9 | 51.2 |
-| normal bot | 50.3 | 33.5 | 25.4 |
-| rest-heavy | 44.8 | 35.9 | 30.0 |
-| always big bid | 37.9 | 19.4 | 16.7 |
-| easy bot | 16.6 | 21.1 | 13.4 |
-| random | 16.1 | 21.7 | 13.4 |
-| cheap 1-Air dodger | 12.1 | 18.3 | 9.6 |
+| hard bot | 68.9 | 63.4 | 50.4 |
+| normal bot | 49.9 | 34.0 | 24.8 |
+| rest-heavy | 42.2 | 34.1 | 26.7 |
+| always big bid | 37.9 | 19.0 | 16.3 |
+| easy bot | 16.4 | 21.5 | 13.4 |
+| random | 16.8 | 20.8 | 14.2 |
+| cheap 1-Air dodger | 11.5 | 18.3 | 9.2 |
 
-No fixed strategy wins everywhere. Big bids fall apart with more players, and rest-heavy play is a little ahead at three and four players but loses at two and is easy to read once you see it. The hard bot looks one tide ahead and plays against what normal bots would do, so it beats them clearly. In a mixed table, where every seat is drawn at random from all the strategies (the sample bot included), it is not on top: at three players the normal bot takes 48.0 percent, the hard bot 45.5 and rest-heavy 40.0, because the hard bot never adapts to how a real opponent plays. Tide events (on in all of these numbers) break up the middle of the match without favouring one style: compared with the same table run without them, no row moved by more than 4 points.
+No fixed strategy wins everywhere. Big bids fall apart with more players, and rest-heavy play sits close to a fair share at three and four players but loses at two and is easy to read once you see it. The hard bot looks one tide ahead and plays against what normal bots would do, so it beats them clearly. In a mixed table, where every seat is drawn at random from all the strategies (the sample bot included), it is not on top: at three players the normal bot takes 48.7 percent, the hard bot 44.8 and rest-heavy 39.3, because the hard bot never adapts to how a real opponent plays. Tide events are on in all of these numbers, and they mostly take away the edge that fixed styles had without them: against the same field of normal bots with events off, the sample bot drops from 39.8 to 32.8 percent at three players and rest-heavy from 38.2 to 34.1, while the hard bot, which plans with the announced event, gains most in mixed four-player tables (33.8 to 39.1).
 
 ## License
 

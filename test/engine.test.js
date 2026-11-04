@@ -98,13 +98,14 @@ test("the final tide pays double", () => {
   assert.equal(g.finished, true);
 });
 
-test("tide events: four dealt from the seed, never on the final tide", () => {
+test("tide events: each of the four once, dealt from the seed, never on the final tide", () => {
   for (let seed = 1; seed <= 200; seed++) {
     const f = createGame(["a", "b", "c"], seed).forecast;
     assert.equal(f.length, RULES.tides);
     assert.equal(f.filter((e) => e !== "calm").length, RULES.eventTides);
     assert.equal(f[RULES.tides - 1], "calm");
     for (const e of f) assert.ok(e in EVENTS);
+    assert.equal(new Set(f.filter((e) => e !== "calm")).size, RULES.eventTides);
   }
   assert.deepEqual(createGame(["a", "b"], 9).forecast, createGame(["x", "y"], 9).forecast);
 });

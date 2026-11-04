@@ -53,7 +53,11 @@ function dealForecast(seed) {
     [slots[i], slots[j]] = [slots[j], slots[i]];
   }
   const deck = ["current", "seam", "bloom", "slack"];
-  for (const t of slots.slice(0, RULES.eventTides)) f[t] = deck[Math.floor(random(g) * deck.length)];
+  for (let i = deck.length - 1; i > 0; i--) {
+    const j = Math.floor(random(g) * (i + 1));
+    [deck[i], deck[j]] = [deck[j], deck[i]];
+  }
+  slots.slice(0, RULES.eventTides).forEach((t, k) => { f[t] = deck[k % deck.length]; });
   return f;
 }
 
