@@ -25,7 +25,7 @@ const State = obj({
   secondsLeft: { type: ["number", "null"] },
   host: int("Always seat 0"),
   seats: { type: "array", items: { oneOf: [obj({ seat: int("Seat"), name: str("Name"), kind: str("human or bot") }), { type: "null" }] } },
-  players: { type: "array", items: obj({ seat: int("Seat"), name: str("Name"), kind: str("human or bot"), air: int("Air"), pearls: int("Pearls"), submitted: { type: "boolean" } }) },
+  players: { type: "array", items: obj({ seat: int("Seat"), name: str("Name"), kind: str("human or bot"), air: int("Air"), pearls: int("Pearls"), submitted: { type: "boolean" }, away: { type: "boolean", description: "A person who let 2 tides in a row time out; the table then waits only 8 s for them. Any move clears it." }, form: obj({ dives: int("Tides spent diving"), rests: int("Tides spent resting"), avgAir: { type: ["number", "null"], description: "Average Air per dive" }, won: int("Wrecks won") }) }) },
   wrecks: { type: "array", items: ref("Wreck") },
   event: { type: ["string", "null"], enum: ["calm", "current", "seam", "bloom", "slack", null], description: "This tide's public event; its text is in rules.eventText" },
   nextEvent: { type: ["string", "null"], enum: ["calm", "current", "seam", "bloom", "slack", null], description: "Next tide's event, announced one tide ahead" },

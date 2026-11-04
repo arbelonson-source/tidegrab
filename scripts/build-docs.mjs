@@ -60,6 +60,10 @@ fs.writeFileSync("public/docs.html", `<!doctype html>
 <body>
 <header class="top"><a class="brand" href="/"><span>Tidegrab</span></a><nav><a href="/">Play</a> <a href="/README.md">Markdown</a> <a href="/api/rules">Rules JSON</a></nav></header>
 <main class="docs" id="doc">
+<section class="card docintro">
+<p><b>Just here to play?</b> Tidegrab runs right in your browser, no install or sign-up. This page is the technical guide for people who want to write a bot that plays over HTTP.</p>
+<p><a class="btn primary big" href="/">Back to the game</a></p>
+</section>
 ${render(md)}
 </main>
 </body>

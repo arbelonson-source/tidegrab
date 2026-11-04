@@ -112,6 +112,7 @@ export class MatchDO {
     this.ctx = ctx;
     this.env = env;
     this.room = null;
+    this.pending = new Set();
     this.ready = ctx.blockConcurrencyWhile(async () => {
       const data = await ctx.storage.get("d");
       if (data) this.room = this.build(data);
@@ -129,7 +130,9 @@ export class MatchDO {
         const key = `${summary.status}|${summary.filled}|${summary.tide}`;
         if (key === this.sent) return;
         this.sent = key;
-        void call(lobbyStub(), "/update", summary).catch(() => {});
+        const sent = call(lobbyStub(), "/update", summary).catch(() => {});
+        this.pending.add(sent);
+        sent.finally(() => this.pending.delete(sent));
       },
     });
   }
@@ -165,6 +168,8 @@ export class MatchDO {
       return;
     }
     this.room.onWake();
+    // Nobody is waiting on an alarm, so make sure the lobby hears about it before the object can sleep.
+    await Promise.all(this.pending);
   }
 }
 

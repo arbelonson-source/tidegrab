@@ -97,6 +97,9 @@ h2 .event { margin-left: 8px; }
 .bub i.off { background: transparent; opacity: 0.35; }
 .sub { font-size: 0.875rem; color: var(--muted); }
 .sub.ok { color: var(--teal); }
+.sub.away { color: var(--bad); }
+.act button.on { box-shadow: 0 0 0 3px var(--teal), 0 0 18px rgba(63, 214, 200, 0.35); }
+.awaynote { margin: 0 0 10px; padding: 8px 12px; border-radius: 10px; border: 1px solid var(--bad); color: var(--bad); }
 .wrecks { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
 .wreck {
   position: relative;
@@ -150,7 +153,7 @@ h2 .event { margin-left: 8px; }
 .docs table { border-collapse: collapse; width: 100%; font-size: .92rem; }
 .docs th, .docs td { border: 1px solid var(--line); padding: 6px 10px; text-align: left; vertical-align: top; }
 .docs th { background: var(--panel2); }
-.top nav { display: flex; gap: 14px; flex-wrap: wrap; }
+.top nav { display: flex; gap: 16px; align-items: center; flex-wrap: nowrap; }
 @keyframes pulse { 50% { opacity: 0.55; } }
 @keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 @keyframes glow { 50% { box-shadow: 0 0 34px rgba(242, 193, 78, 0.7); } }
@@ -163,6 +166,7 @@ h2 .event { margin-left: 8px; }
   .players { grid-template-columns: repeat(2, 1fr); }
   .bub i { width: 7px; height: 7px; }
   .bub { max-width: 100%; }
+  .top .devlink { display: none; }
 }
 .qbtn { min-width: 44px; padding: 0; border-radius: 50%; font-weight: 800; }
 .linkbtn { background: none; border: 0; min-height: 0; padding: 2px 4px; color: var(--teal); text-decoration: underline; font: inherit; cursor: pointer; }
@@ -190,7 +194,7 @@ kbd { font: 0.8rem/1 ui-monospace, monospace; padding: 3px 6px; border-radius: 6
 .rlink { width: 100%; max-width: 420px; margin-top: 10px; }
 .hstep p { margin: 2px 0 0; }
 .hstep b { display: block; }
-@media (max-width: 480px) { .hart { flex-basis: 72px; } .hart svg { width: 72px; height: 46px; } .st2 { font-size: 0.78rem; } .st2 th, .st2 td { padding: 5px 3px; } dialog.help { padding: 14px; } }
+@media (max-width: 480px) { .hart { flex-basis: 96px; } .hart svg { width: 96px; height: 51px; } .st2 { font-size: 0.78rem; } .st2 th, .st2 td { padding: 5px 3px; } dialog.help { padding: 14px; } }
 .reactions { padding: 10px 16px; }
 .emotebar { gap: 6px; }
 .emo { min-width: 44px; min-height: 44px; padding: 4px 8px; font-size: 1.3rem; line-height: 1; }
@@ -230,3 +234,17 @@ h2 .mine { margin: 0 0 0 10px; font-size: 0.75rem; vertical-align: middle; color
 .scrub input[type="range"] { width: 100%; padding: 0; accent-color: var(--gold); }
 .bidcheck { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; margin-top: 6px; }
 .bidcheck input { width: auto; min-height: 0; }
+/* Phones: two reveal cards per row so the tide result doesn't push the move panel a screen down. */
+@media (max-width: 480px) {
+  .reveal { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .rw { padding: 8px 9px; }
+  .rw .dv { gap: 6px; font-size: 0.85rem; }
+  .rw .dv span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rw .verdict { font-size: 0.84rem; }
+  .rw .why { font-size: 0.8rem; }
+}
+
+.foot { padding: 8px 16px 28px; font-size: .9rem; }
+.docintro { margin: 8px 0 18px; }
+.docintro p { margin: 0 0 12px; }
+.pl .form { font-size: .8rem; color: var(--muted); margin-top: 2px; }

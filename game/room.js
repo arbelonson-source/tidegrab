@@ -4,6 +4,10 @@ import { chooseMove, LEVELS } from "../bots/brain.js";
 const BOT_NAMES = ["Coral", "Kelp", "Manta", "Brine", "Nacre", "Squall", "Abyss", "Tern"];
 const LOBBY_TTL = 900000;
 const MAX_WAITERS = 400;
+// A person who lets this many tides time out in a row is marked away, and the table
+// then waits only AWAY_WAIT_MS for them instead of the whole turn timer.
+export const AWAY_AFTER = 2;
+export const AWAY_WAIT_MS = 8000;
 const EMOTE_KEEP = 12;
 const EMOTE_SHOW = 8000;
 const EMOTE_GAP = 1500;
@@ -96,6 +100,18 @@ export function parseCreate(body) {
 
 // hooks: { now(), save(snapshot, immediate), wake(atMs|null), notify?(summary) }.
 // All time-based behaviour (bot delays, deadlines, reveal pause) runs from onWake().
+// What each diver has shown so far, from the public reveals: dives, rests,
+// average Air per dive and wrecks won.
+export function formOf(g, seat) {
+  let dives = 0, spent = 0, won = 0;
+  for (const ev of g.history) {
+    const m = ev.moves[seat];
+    if (m && !m.rest) { dives++; spent += m.air; }
+    won += ev.wrecks.filter((w) => w.winner === seat).length;
+  }
+  return { dives, rests: g.history.length - dives, avgAir: dives ? Math.round((spent / dives) * 10) / 10 : null, won };
+}
+
 export class MatchRoom {
   constructor(data, hooks, opts = {}) {
     this.d = data;
@@ -144,6 +160,7 @@ export class MatchRoom {
     const d = this.d;
     return {
       code: d.code,
+      version: d.version,
       status: d.status,
       host: d.seats[0] ? d.seats[0].name : "",
       seats: d.settings.seats,
@@ -180,9 +197,17 @@ export class MatchRoom {
     });
   }
 
+  isAway(seat) {
+    const d = this.d;
+    return d.seats[seat].kind !== "bot" && ((d.missed && d.missed[seat]) || 0) >= AWAY_AFTER;
+  }
+
   resolveAt() {
     const d = this.d;
-    return d.game.players.every((p) => d.moves[p.seat]) ? d.pauseUntil : d.deadline;
+    const waiting = d.game.players.filter((p) => !d.moves[p.seat]);
+    if (!waiting.length) return d.pauseUntil;
+    if (waiting.every((p) => this.isAway(p.seat))) return Math.min(d.deadline, d.pauseUntil + AWAY_WAIT_MS);
+    return d.deadline;
   }
 
   nextWake() {
@@ -283,6 +308,7 @@ export class MatchRoom {
     const err = checkMove(d.game, seat, move);
     if (err) throw new ApiError(400, err, { legal: this.legalFor(seat) });
     d.moves[seat] = normalizeMove(move);
+    if (d.missed) delete d.missed[seat];
     this.commit();
     return d.moves[seat];
   }
@@ -291,6 +317,11 @@ export class MatchRoom {
     const d = this.d;
     const g = d.game;
     const before = { wrecks: g.wrecks.map((w) => ({ ...w })), players: g.players.map((p) => ({ seat: p.seat, air: p.air, pearls: p.pearls })) };
+    d.missed = d.missed || {};
+    for (const p of g.players) {
+      if (d.seats[p.seat].kind === "bot" || d.moves[p.seat]) delete d.missed[p.seat];
+      else d.missed[p.seat] = (d.missed[p.seat] || 0) + 1;
+    }
     const ev = resolveTide(g, g.players.map((p) => d.moves[p.seat]));
     d.rounds.push({ tide: ev.tide, payout: ev.payout, event: ev.event, last: g.finished, before, moves: ev.moves, results: ev.wrecks, standings: ev.standings });
     if (g.finished) {
@@ -331,6 +362,8 @@ export class MatchRoom {
             air: p.air,
             pearls: p.pearls,
             submitted: playing ? !!d.moves[p.seat] : false,
+            away: playing && this.isAway(p.seat),
+            form: formOf(g, p.seat),
           }))
         : [],
       wrecks: g && !g.finished ? g.wrecks.map((w) => ({ ...w })) : [],
