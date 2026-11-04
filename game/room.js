@@ -45,7 +45,7 @@ function parseMove(body, legal) {
   const fail = (msg) => {
     throw new ApiError(400, msg, { code: "bad_move", legal: legal() });
   };
-  const odd = Object.keys(body).filter((k) => !["wreck", "air", "rest", "token"].includes(k));
+  const odd = Object.keys(body).filter((k) => !["wreck", "air", "rest", "token", "tide"].includes(k));
   const rest = body.rest === false ? undefined : body.rest;
   if (rest === undefined && !has("wreck") && !has("air")) fail((odd.length ? `unknown field "${odd[0]}": ` : "empty move: ") + MOVE_SHAPE);
   if (rest !== undefined && rest !== null) {
@@ -72,7 +72,7 @@ export class ApiError extends Error {
 export const useMethod = (allow) => new ApiError(405, "use " + allow.split(", ").join(" or "), { allow, code: "wrong_method" });
 
 // The match is in the wrong state for this request (409), with a stable code for bots.
-const conflict = (code, message) => new ApiError(409, message, { code });
+const conflict = (code, message, extra = {}) => new ApiError(409, message, { code, ...extra });
 
 const tokenError = (token) => new ApiError(401, token ? BAD_TOKEN : NO_TOKEN, { code: token ? "bad_token" : "no_token" });
 
@@ -94,7 +94,7 @@ export function parseBody(text, contentType = "") {
   try {
     v = JSON.parse(text);
   } catch (e) {
-    if (/form/i.test(contentType) || /^[\w.%-]+=[^{}]*$/.test(text))
+    if (!/^[[{]/.test(text) && (/form/i.test(contentType) || /^[\w.%-]+=[^{}]*$/.test(text)))
       throw new ApiError(400, "the body looks like a form (key=value), send JSON instead, e.g. " + formAsJson(text), { code: "form_body" });
     throw new ApiError(400, "the body is not valid JSON (" + String(e.message).slice(0, 80) + ")", { code: "bad_json" });
   }
@@ -292,7 +292,7 @@ export class MatchRoom {
         delete d.botDue[key];
         if (d.moves[seat]) continue;
         try {
-          this.submitMove(seat, chooseMove(d.game, seat, d.settings.botLevel));
+          this.submitMove(seat, chooseMove(d.game, seat, d.seats[seat].level || d.settings.botLevel));
         } catch (e) {
           console.error("bot move failed", d.code, e.message);
         }
@@ -305,7 +305,7 @@ export class MatchRoom {
     }
   }
 
-  addSeat(name, kind) {
+  addSeat(name, kind, level) {
     const d = this.d;
     const i = d.seats.findIndex((s) => !s);
     if (i < 0) throw conflict("lobby_full", "the lobby is full");
@@ -313,13 +313,14 @@ export class MatchRoom {
     const taken = new Set(d.seats.filter(Boolean).map((s) => s.name));
     for (let n = 2; taken.has(finalName); n++) finalName = `${name.slice(0, 17)} ${n}`;
     d.seats[i] = { name: finalName, kind, token: kind === "human" ? randToken() : null };
+    if (level) d.seats[i].level = level;
     return i;
   }
 
-  addBot() {
+  addBot(level = this.d.settings.botLevel) {
     const used = new Set(this.d.seats.filter(Boolean).map((s) => s.name));
     const pool = BOT_NAMES.filter((n) => !used.has("Bot " + n));
-    return this.addSeat("Bot " + (pool.length ? pool[randInt(pool.length)] : "Reef"), "bot");
+    return this.addSeat("Bot " + (pool.length ? pool[randInt(pool.length)] : "Reef"), "bot", level);
   }
 
   startMatch() {
@@ -396,12 +397,13 @@ export class MatchRoom {
       pauseUntil: playing ? d.pauseUntil : null,
       secondsLeft: playing ? Math.max(0, Math.ceil((d.deadline - now) / 1000)) : null,
       host: 0,
-      seats: d.seats.map((s, i) => (s ? { seat: i, name: s.name, kind: s.kind } : null)),
+      seats: d.seats.map((s, i) => (s ? { seat: i, name: s.name, kind: s.kind, ...(s.kind === "bot" ? { level: s.level || d.settings.botLevel } : {}) } : null)),
       players: g
         ? g.players.map((p) => ({
             seat: p.seat,
             name: p.name,
             kind: d.seats[p.seat].kind,
+            ...(d.seats[p.seat].kind === "bot" ? { level: d.seats[p.seat].level || d.settings.botLevel } : {}),
             air: p.air,
             pearls: p.pearls,
             submitted: playing ? !!d.moves[p.seat] : false,
@@ -579,8 +581,10 @@ export class MatchRoom {
       const free = d.seats.filter((s) => !s).length;
       const n = body.count === undefined ? 1 : body.count;
       if (!Number.isInteger(n) || n < 1) throw new ApiError(400, "count must be a whole number, at least 1");
+      const level = body.level === undefined || body.level === null ? d.settings.botLevel : body.level;
+      if (!LEVELS.includes(level)) throw new ApiError(400, "level must be one of: " + LEVELS.join(", "));
       if (free === 0) throw conflict("no_empty_seats", "no empty seats");
-      for (let i = 0; i < Math.min(n, free); i++) this.addBot();
+      for (let i = 0; i < Math.min(n, free); i++) this.addBot(level);
       if (d.seats.every(Boolean)) this.startMatch();
       else this.commit(true);
       return { status: 200, json: this.publicState(0) };
@@ -597,10 +601,13 @@ export class MatchRoom {
       if (seat === null) throw tokenError(token);
       if (d.status !== "playing") throw d.status === "lobby" ? conflict("not_started", "the match has not started yet: wait until status is \"playing\" (the host starts it, or it starts when every seat is filled)") : conflict("match_over", "the match is over");
       const move = parseMove(body, () => this.legalFor(seat));
-      const odd = Object.keys(body).filter((k) => !["wreck", "air", "rest", "token"].includes(k));
-    const err = checkMove(d.game, seat, move);
-    if (err) throw new ApiError(400, err + (odd.length ? ` (unknown field "${odd[0]}" was ignored: ${MOVE_SHAPE})` : ""), { code: "bad_move", legal: this.legalFor(seat) });
-    const accepted = this.submitMove(seat, move);
+      const odd = Object.keys(body).filter((k) => !["wreck", "air", "rest", "token", "tide"].includes(k));
+      if (body.tide !== undefined && body.tide !== null && !/^\d{1,2}$/.test(String(body.tide))) throw new ApiError(400, "tide must be the tide number from the state (or left out)", { code: "bad_move", legal: this.legalFor(seat) });
+      if (body.tide !== undefined && body.tide !== null && Number(body.tide) !== d.game.tide)
+        throw conflict("stale_tide", `that move was for tide ${body.tide}, but it is tide ${d.game.tide} now: read the state again and move for tide ${d.game.tide}`, { tide: d.game.tide, legal: this.legalFor(seat) });
+      const err = checkMove(d.game, seat, move);
+      if (err) throw new ApiError(400, err + (odd.length ? ` (unknown field "${odd[0]}" was ignored: ${MOVE_SHAPE})` : ""), { code: "bad_move", legal: this.legalFor(seat) });
+      const accepted = this.submitMove(seat, move);
       return { status: 200, json: { ok: true, tide: d.game.tide, move: accepted, version: d.version } };
     }
     if (sub === "emote") {

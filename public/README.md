@@ -1,10 +1,10 @@
 # Tidegrab
 
-A small turn-based strategy game of secret bids for 2 to 4 players, humans in the browser and agents over a plain HTTP/JSON API. A match takes about 5 minutes, and empty seats can be filled by bots.
+A small turn-based strategy game of secret bids for 2 to 4 players, humans in the browser and agents over a plain HTTP/JSON API. A match is 8 tides: about 40 seconds against bots, up to 6 minutes with people at the default 45-second timer. Empty seats can be filled by bots.
 
 **Play now: https://tidegrab.arbelonski.workers.dev** (no install, no login). Source: https://github.com/arbelonson-source/tidegrab
 
-![A match in progress: tide 5 of 8 under an air pocket bloom, with the next tide's rich seam announced, three divers' Air and pearls, two wrecks, the move controls and the previous tide's reveal](public/screenshot.webp)
+![A match in progress: tide 5 of 8 under an air pocket bloom, with the next tide's rich seam announced, three divers' Air and pearls, two wrecks, the move controls and the previous tide's reveal](/screenshot.webp)
 
 ## Rules in 30 seconds
 
@@ -14,7 +14,7 @@ A small turn-based strategy game of secret bids for 2 to 4 players, humans in th
 - Wrecks nobody claims grow, and the last tide pays double, so saving Air for the right moment matters.
 - Four tides bring a public event, one each of strong current, rich seam, air pocket bloom and slack water, always announced one tide ahead.
 
-**Writing a bot?** Three calls are enough: create a match, long-poll its state, send a move. See [Agent API](#agent-api) below, or run `python3 bots/sample_bot.py` (or `node bots/sample_bot.mjs`) to watch one play a full match.
+**Writing a bot?** Three calls are enough: create a match, long-poll its state, send a move. See [Agent API](#agent-api) below, or run `python3 bots/sample_bot.py` (or `node bots/sample_bot.mjs`, or `bash bots/sample_bot.sh` with curl and jq) from a clone of [the repo](https://github.com/arbelonson-source/tidegrab) to watch one play a full match.
 
 ## Full rules
 
@@ -61,21 +61,21 @@ Base URL: `https://tidegrab.arbelonski.workers.dev` (or your own server). Bodies
 | `GET /api/matches` | `{open: [...], live: [...]}`: open lobbies and running matches |
 | `POST /api/matches` | Create a match: `{"name","seats":2-4,"bots":0-3,"turnSeconds":5-120,"botLevel":"normal"\|"easy"\|"hard"}` (defaults: 2 seats, 0 bots, 45 s, normal; bots at most seats - 1). Returns `{code, seat, token, url}`. You are the host, seat 0. |
 | `POST /api/matches/CODE/join` | `{"name"}` returns `{seat, token, url}`. The match starts by itself as soon as every seat is filled. |
-| `POST /api/matches/CODE/bots` | Host only: `{"count":1}` adds bots to empty seats |
+| `POST /api/matches/CODE/bots` | Host only: `{"count":1}` adds bots to empty seats. Add `"level":"hard"` (or `easy`, `normal`) to set these bots' level, so one table can mix levels; it defaults to the match's `botLevel`. Each bot's level is in `players[].level`. |
 | `POST /api/matches/CODE/start` | Host only: fills empty seats with bots and starts |
 | `GET /api/matches/CODE?wait=V` | The state (fields below). With `wait`, the call holds up to 25 s while `version` is still `V`, so a loop never needs to sleep (a `V` ahead of the version, which can happen after a server restart, answers at once). With a token it includes `you`. Watchers may add `viewer=ID` (a random 6-32 character id) to be counted in `watching`. |
-| `POST /api/matches/CODE/move` | `{"wreck": ID, "air": N}` to dive or `{"rest": true}` to rest (`"rest": false` next to a dive is fine). Returns `{ok, tide, move, version}`. Sending again before the tide resolves replaces your move. |
+| `POST /api/matches/CODE/move` | `{"wreck": ID, "air": N}` to dive or `{"rest": true}` to rest (`"rest": false` next to a dive is fine). Returns `{ok, tide, move, version}`. Sending again before the tide resolves replaces your move. Moves sent during the reveal pause (before `pauseUntil`) count for the new tide. Optional `"tide": N`: if it is no longer tide N you get 409 `stale_tide` (with the current `tide` and `legal`) instead of the move landing on the next tide. |
 | `POST /api/matches/CODE/rematch` | After a match ends, any seated human (with their token) asks for a rematch. The first one opens a new match with the same seats, bots and settings; the others who ask join it. Returns `{code, seat, token, url}` for the new match, and asking again returns the same seat. The old match's state shows the new code in `rematch`. |
-| `GET /api/matches/CODE/log` | The full match log, for replays |
+| `GET /api/matches/CODE/log` | The match log, for replays. While the match runs it has the tides done so far (`seed` stays null until it ends) |
 | `POST /api/matches/CODE/emote` | `{"emote": "wave"}`, one of `wave, wow, lol, ouch, gg, pearl` (the list is in `rules.emotes`). The token is optional, so watchers can send emotes too. Players get one every 1.5 s; all watchers together share 5 every 5 s, and over that the answer is 429 with `retryAfterMs`. Returns `{ok, emote, version}`. |
 | `GET /api/openapi.json` | OpenAPI 3.1 description of every endpoint, for code generators and tool-calling agents |
 | `GET /healthz` | `{ok: true}` |
 
 ```
-curl -s -X POST $BASE/api/matches -d '{"name":"agent","seats":2,"bots":1}'
+curl -s -X POST $BASE/api/matches -H 'Content-Type: application/json' -d '{"name":"agent","seats":2,"bots":1}'
 curl -s "$BASE/api/matches/CODE?wait=0" -H "Authorization: Bearer TOKEN"
-curl -s -X POST $BASE/api/matches/CODE/move -H "Authorization: Bearer TOKEN" -d '{"wreck":1,"air":2}'
-curl -s -X POST $BASE/api/matches/CODE/move -H "Authorization: Bearer TOKEN" -d '{"rest":true}'
+curl -s -X POST $BASE/api/matches/CODE/move -H "Authorization: Bearer TOKEN" -H 'Content-Type: application/json' -d '{"wreck":1,"air":2,"tide":1}'
+curl -s -X POST $BASE/api/matches/CODE/move -H "Authorization: Bearer TOKEN" -H 'Content-Type: application/json' -d '{"rest":true}'
 ```
 
 **Tokens.** Every human seat gets its own token from create or join. Send it as `Authorization: Bearer <token>` (a `token` field in a JSON body also works). Bots need no token. Match codes are 5 letters and digits and are not case sensitive.
@@ -114,7 +114,7 @@ curl -s -X POST $BASE/api/matches/CODE/move -H "Authorization: Bearer TOKEN" -d 
 
 Here `you.move` is `null` and `status` is `playing`, so it is your turn: send `{"wreck": 3, "air": 2}` (any id from `legal.wrecks`, Air from `minAir` to `maxAir`) or `{"rest": true}`. `players[].submitted` shows who has already locked in, never what they chose. Then long-poll with `?wait=5`; the reply comes back as soon as anything changes, and once `tide` is 3 the outcome of tide 2 is in `lastReveal`.
 
-**Errors.** Errors are `{"error": "...", "code": "..."}` with an HTTP status. The `error` text is for people and may change; `code` is stable, so branch on that. 400 for a bad request (`bad_json`, `not_object`, `form_body` for a form instead of JSON, `bad_request`) or an illegal move (`bad_move`, with the `legal` options attached), 401 for a missing token (`no_token`) or one that is not a seat in this match (`bad_token`), 403 for host-only actions (`not_host`), 404 for an unknown match (`not_found`), 405 for the wrong method (`wrong_method`, with an `Allow` header), 409 when the match is in the wrong state for the request (`lobby_full`, `already_started`, `no_empty_seats`, `match_running`, `not_started`, `match_over`, `not_over`), 413 for a body over 16 KB (`too_large`), 429 (`rate_limited`) for more than 300 requests in 10 s from one address or more than 5 open lobbies or 12 running matches from one address, and 503 (`busy`) when the server is full or too many long-polls are waiting (retry without `wait`). Names are trimmed to 20 characters. Wreck ids and air sent as numeric strings (`"2"`) are accepted, and an unknown field such as `bid` is named in the error.
+**Errors.** Errors are `{"error": "...", "code": "..."}` with an HTTP status. The `error` text is for people and may change; `code` is stable, so branch on that. 400 for a bad request (`bad_json`, `not_object`, `form_body` for a form instead of JSON, `bad_request`) or an illegal move (`bad_move`, with the `legal` options attached), 401 for a missing token (`no_token`) or one that is not a seat in this match (`bad_token`), 403 for host-only actions (`not_host`), 404 for an unknown match (`not_found`), 405 for the wrong method (`wrong_method`, with an `Allow` header), 409 when the match is in the wrong state for the request (`lobby_full`, `already_started`, `no_empty_seats`, `match_running`, `not_started`, `match_over`, `not_over`, `stale_tide` for a move sent with an old `tide`), 413 for a body over 16 KB (`too_large`), 429 (`rate_limited`) for more than 300 requests in 10 s from one address or more than 5 open lobbies or 12 running matches from one address, and 503 (`busy`) when the server is full or too many long-polls are waiting (retry without `wait`). Names are trimmed to 20 characters. Wreck ids and air sent as numeric strings (`"2"`) are accepted, and an unknown field such as `bid` is named in the error.
 
 **Timing.** A player who does not move before the timer runs out rests. A person who lets 2 tides in a row run out is marked away, and from then on the table waits only 8 seconds for them each tide; any move brings them back. Lobbies nobody starts close after 15 minutes. Finished matches and their replays are kept for a day.
 

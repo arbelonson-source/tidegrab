@@ -20,14 +20,15 @@ const EMOTE_IDS = ["wave", "wow", "lol", "ouch", "gg", "pearl"];
 const ERROR_CODES = [
   "bad_request", "bad_json", "not_object", "form_body", "bad_move",
   "no_token", "bad_token", "forbidden", "not_host", "not_found", "wrong_method",
-  "conflict", "lobby_full", "already_started", "no_empty_seats", "match_running", "not_started", "match_over", "not_over",
+  "conflict", "lobby_full", "already_started", "no_empty_seats", "match_running", "not_started", "match_over", "not_over", "stale_tide",
   "too_large", "rate_limited", "busy", "internal",
 ];
 
 const ErrorBody = obj({
   error: str("What went wrong, in words; the wording may change"),
   code: str("Stable machine-readable reason; branch on this", { enum: ERROR_CODES }),
-  legal: { ...ref("Legal"), description: "Only on `bad_move`: what you may send right now" },
+  legal: { ...ref("Legal"), description: "Only on `bad_move` and `stale_tide`: what you may send right now" },
+  tide: int("Only on `stale_tide`: the tide it is now"),
   allow: str("Only on 405: the methods this path takes (also in the Allow header)"),
   retryAfterMs: int("Only on some 429s: how long to wait"),
   emotes: arr({ type: "string" }, "Only on a bad emote: the allowed ones"),
@@ -55,6 +56,8 @@ const Rules = obj({
 const Settings = obj({ seats: int("Seats"), turnSeconds: int("Seconds per tide"), botLevel: str("Bot level", { enum: ["easy", "normal", "hard"] }) }, ["seats", "turnSeconds", "botLevel"]);
 const Wreck = obj({ id: int("Wreck id; ids keep increasing during a match"), pearls: int("Pearls on the wreck"), air: int("Air pocket the winner also takes (0 = none)"), age: int("Tides it went unclaimed") }, ["id", "pearls", "air", "age"]);
 const Move = { description: "Dive or rest. Whole-number strings such as \"2\" are also accepted for wreck and air; the reply's move shows what was taken.", oneOf: [obj({ wreck: int("A wreck id from wrecks"), air: int("Air to spend, 1..your air") }, ["wreck", "air"]), obj({ rest: { type: "boolean", enum: [true] } }, ["rest"])] };
+const tideGuard = int("Optional: the tide this move is for (`tide` in the state). If the game has moved on you get 409 `stale_tide` instead of the move landing on the wrong tide");
+const MoveBody = { description: Move.description + " Moves sent during the reveal pause (before `pauseUntil`) count for the new tide.", oneOf: [obj({ wreck: int("A wreck id from wrecks"), air: int("Air to spend, 1..your air"), tide: tideGuard }, ["wreck", "air"]), obj({ rest: { type: "boolean", enum: [true] }, tide: tideGuard }, ["rest"])] };
 const Standing = obj({ seat: int("Seat"), air: int("Air after the tide"), pearls: int("Pearls after the tide") }, ["seat", "air", "pearls"]);
 const Result = obj({ id: int("Wreck id"), pearls: int("Pearls before payout"), air: int("Air pocket"), divers: arr(obj({ seat: int("Seat"), air: int("Air spent") })), winner: { type: ["integer", "null"], description: "Seat that took it, or null (no divers, or a tie)" }, tie: bool("Two or more divers tied for the most Air, so nobody took it"), gain: int("Pearls the winner got (doubled on the final tide)") }, ["id", "pearls", "air", "divers", "winner", "tie", "gain"]);
 const RevealMove = obj({ seat: int("Seat"), wreck: int("Wreck id, when diving"), air: int("Air spent, when diving"), rest: bool("Rested"), auto: bool("Timed out, so rested") }, ["seat"]);
@@ -67,7 +70,7 @@ const Reveal = obj({
   standings: arr(ref("Standing"), "Everyone's Air and pearls right after the tide"),
 }, ["tide", "payout", "event", "moves", "wrecks", "standings"]);
 const Player = obj({
-  seat: int("Seat"), name: str("Name"), kind: str("human or bot", { enum: ["human", "bot"] }), air: int("Air"), pearls: int("Pearls"),
+  seat: int("Seat"), name: str("Name"), kind: str("human or bot", { enum: ["human", "bot"] }), level: str("Bots only: easy, normal or hard", { enum: ["easy", "normal", "hard"] }), air: int("Air"), pearls: int("Pearls"),
   submitted: bool("Has a move in for this tide (the move itself stays secret)"),
   away: bool("A person who let 2 tides in a row time out; the table then waits only 8 s for them. Any move clears it."),
   form: obj({ dives: int("Tides spent diving"), rests: int("Tides spent resting"), avgAir: { type: ["number", "null"], description: "Average Air per dive" }, won: int("Wrecks won") }, ["dives", "rests", "avgAir", "won"]),
@@ -84,7 +87,7 @@ const State = obj({
   pauseUntil: { type: ["integer", "null"], description: "End of the short reveal pause, ms. Moves for the next tide are already accepted during it" },
   secondsLeft: { type: ["number", "null"], description: "Seconds until the tide resolves" },
   host: int("Always seat 0"),
-  seats: arr(nul(obj({ seat: int("Seat"), name: str("Name"), kind: str("human or bot") })), "One entry per seat; null while free"),
+  seats: arr(nul(obj({ seat: int("Seat"), name: str("Name"), kind: str("human or bot"), level: str("Bots only: easy, normal or hard") })), "One entry per seat; null while free"),
   players: arr(ref("Player"), "Empty in the lobby"),
   wrecks: arr(ref("Wreck")),
   event: { type: ["string", "null"], enum: [...EVENT_IDS, null], description: "This tide's public event (text in rules.eventText); null on the final tide, which pays double instead" },
@@ -132,7 +135,7 @@ const DESCRIPTION = [
 export function openapi(origin) {
   return {
     openapi: "3.1.0",
-    info: { title: "Tidegrab", version: "1.1.0", description: DESCRIPTION.replace("ORIGIN", origin) },
+    info: { title: "Tidegrab", version: "1.2.0", description: DESCRIPTION.replace("ORIGIN", origin) },
     servers: [{ url: origin }],
     components: {
       securitySchemes: { bearer: { type: "http", scheme: "bearer", description: "The seat token from create/join/rematch" } },
@@ -148,12 +151,12 @@ export function openapi(origin) {
       },
       "/api/matches/{code}": { get: { operationId: "getMatch", summary: "Match state; with ?wait=<version> it long-polls (up to ~25 s) until the version is different", parameters: [code, { name: "wait", in: "query", schema: int("Last version you saw. Any other number, for example one ahead after a server restart, answers at once") }, { name: "viewer", in: "query", schema: str("Watchers only: a random 6-32 character id (letters, digits, _ or -) so you count in `watching`") }], security: [...auth, {}], responses: { 200: json(ref("State")), ...e401, ...errs } } },
       "/api/matches/{code}/join": { post: { operationId: "joinMatch", summary: "Take a free seat in a lobby; the match starts once every seat is filled", parameters: [code], requestBody: body(obj({ name: str("Your name") })), responses: { 200: json(ref("Joined")), ...errs, ...conflict(["lobby_full", "already_started", "match_running", "match_over"]) } } },
-      "/api/matches/{code}/bots": { post: { operationId: "addBots", summary: "Host only: fill free seats with bots", parameters: [code], security: auth, requestBody: body(obj({ count: int("How many", { default: 1 }) })), responses: { 200: json(ref("State")), ...e401, ...e403, ...errs, ...conflict(["already_started", "no_empty_seats"]) } } },
+      "/api/matches/{code}/bots": { post: { operationId: "addBots", summary: "Host only: fill free seats with bots", parameters: [code], security: auth, requestBody: body(obj({ count: int("How many", { default: 1 }), level: str("Level for these bots; defaults to the match's botLevel, so one table can mix levels", { enum: ["easy", "normal", "hard"] }) })), responses: { 200: json(ref("State")), ...e401, ...e403, ...errs, ...conflict(["already_started", "no_empty_seats"]) } } },
       "/api/matches/{code}/start": { post: { operationId: "startMatch", summary: "Host only: start now; free seats get bots", parameters: [code], security: auth, responses: { 200: json(ref("State")), ...e401, ...e403, ...errs, ...conflict(["already_started"]) } } },
-      "/api/matches/{code}/move": { post: { operationId: "sendMove", summary: "Your move for this tide; you can change it until the tide resolves. Unknown extra fields are ignored on a valid move", parameters: [code], security: auth, requestBody: body(ref("Move"), true), responses: { 200: json(obj({ ok: bool(), tide: int("Tide"), move: ref("Move"), version: int("New version") }, ["ok", "tide", "move", "version"])), 400: err("`bad_move`: the body also has `legal`"), ...e401, 404: errs[404], 429: errs[429], ...conflict(["not_started", "match_over"]) } } },
+      "/api/matches/{code}/move": { post: { operationId: "sendMove", summary: "Your move for this tide; you can change it until the tide resolves. Unknown extra fields are ignored on a valid move", parameters: [code], security: auth, requestBody: body(MoveBody, true), responses: { 200: json(obj({ ok: bool(), tide: int("Tide"), move: ref("Move"), version: int("New version") }, ["ok", "tide", "move", "version"])), 400: err("`bad_move`: the body also has `legal`"), ...e401, 404: errs[404], 429: errs[429], ...conflict(["not_started", "match_over", "stale_tide"]) } } },
       "/api/matches/{code}/emote": { post: { operationId: "sendEmote", summary: "Send a preset emote; the token is optional, so watchers can send too. Players: one every 1.5 s. Watchers share 5 every 5 s", parameters: [code], security: [...auth, {}], requestBody: body(obj({ emote: { type: "string", enum: EMOTE_IDS } }, ["emote"]), true), responses: { 200: json(obj({ ok: bool(), emote: ref("Emote"), version: int("New version") }, ["ok", "emote", "version"])), ...e401, ...errs } } },
       "/api/matches/{code}/rematch": { post: { operationId: "rematch", summary: "After the match: open or join a rematch with the same table; asking again returns the same seat", parameters: [code], security: auth, responses: { 200: json(ref("Joined")), ...e401, ...errs, ...conflict(["not_over"]) } } },
-      "/api/matches/{code}/log": { get: { operationId: "getLog", summary: "Replay log: every finished tide with the board before it, all moves and results", parameters: [code], responses: { 200: json(ref("Log")), ...errs } } },
+      "/api/matches/{code}/log": { get: { operationId: "getLog", summary: "Replay log: every finished tide with the board before it, all moves and results. Works while the match is running too (only the tides done so far; `seed` is null until it ends)", parameters: [code], responses: { 200: json(ref("Log")), ...errs } } },
       "/healthz": { get: { operationId: "health", summary: "Liveness check", responses: { 200: json(obj({ ok: bool() }, ["ok"])) } } },
     },
   };

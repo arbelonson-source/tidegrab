@@ -49,7 +49,8 @@ export function render(md) {
 }
 
 const md = fs.readFileSync("README.md", "utf8");
-fs.writeFileSync("public/README.md", md);
+// Served at /README.md, so repo-relative image paths become site paths.
+fs.writeFileSync("public/README.md", md.replace(/\]\(public\//g, "](/"));
 fs.writeFileSync("public/docs.html", `<!doctype html>
 <html lang="en">
 <head>
