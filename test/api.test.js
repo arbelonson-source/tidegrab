@@ -88,13 +88,16 @@ test("rules, health and index endpoints", async () => {
 
 test("move shapes: rest:false dives, mixed or empty moves explain themselves", async () => {
   const { json } = await call("/api/matches", { name: "T", seats: 2, bots: 1 });
-  let st;
-  for (let i = 0; i < 100; i++) {
-    st = (await call(`/api/matches/${json.code}?wait=0`, null, json.token)).json;
-    if (st.status === "playing" && !(st.pauseUntil > st.serverTime)) break;
-    await new Promise((r) => setTimeout(r, 20));
-  }
-  const id = st.wrecks[0].id;
+  const ready = async (tide = 1) => {
+    let st;
+    for (let i = 0; i < 300; i++) {
+      st = (await call(`/api/matches/${json.code}?wait=0`, null, json.token)).json;
+      if (st.status === "playing" && st.tide >= tide && !(st.pauseUntil > st.serverTime)) return st;
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    return st;
+  };
+  const id = (await ready()).wrecks[0].id;
   const empty = await call(`/api/matches/${json.code}/move`, {}, json.token);
   assert.equal(empty.status, 400);
   assert.match(empty.json.error, /empty move/);
@@ -107,9 +110,10 @@ test("move shapes: rest:false dives, mixed or empty moves explain themselves", a
   assert.match(unknown.json.error, /unknown field "wreckId"/);
   const strings = await call(`/api/matches/${json.code}/move`, { wreck: String(id), air: "2" }, json.token);
   assert.deepEqual(strings.json.move, { wreck: id, air: 2 });
-  const ok = await call(`/api/matches/${json.code}/move`, { rest: false, wreck: id, air: 1 }, json.token);
-  assert.equal(ok.status, 200);
-  assert.deepEqual(ok.json.move, { wreck: id, air: 1 });
+  const now = (await ready(2)).wrecks[0].id;
+  const ok = await call(`/api/matches/${json.code}/move`, { rest: false, wreck: now, air: 1 }, json.token);
+  assert.equal(ok.status, 200, JSON.stringify(ok.json));
+  assert.deepEqual(ok.json.move, { wreck: now, air: 1 });
   assert.equal((await call(`/api/matches/${json.code}?wait=abc`, null, json.token)).status, 400);
   assert.equal((await call(`/api/matches/${json.code}/log`)).json.seed, null);
 });

@@ -11,7 +11,7 @@ const errs = { 400: err("Bad input; for moves the body also has `legal`"), 401: 
 const Wreck = obj({ id: int("Wreck id; ids keep increasing during a match"), pearls: int("Pearls on the wreck"), air: int("Air pocket the winner also takes"), age: int("Tides it went unclaimed") });
 const Move = { oneOf: [obj({ wreck: int("A wreck id from wrecks"), air: int("Air to spend, 1..your air") }, ["wreck", "air"]), obj({ rest: { type: "boolean", enum: [true] } }, ["rest"])] };
 const Result = obj({ id: int("Wreck id"), pearls: int("Pearls before payout"), air: int("Air pocket"), divers: { type: "array", items: obj({ seat: int("Seat"), air: int("Air spent") }) }, winner: { type: ["integer", "null"] }, tie: { type: "boolean" }, gain: int("Pearls the winner got (doubled on the final tide)") });
-const Reveal = obj({ tide: int("Tide number"), payout: int("1, or 2 on the final tide"), moves: { type: "array", items: obj({ seat: int("Seat"), wreck: int("Wreck id"), air: int("Air"), rest: { type: "boolean" }, auto: { type: "boolean", description: "Timed out, so rested" } }) }, wrecks: { type: "array", items: ref("Result") } });
+const Reveal = obj({ tide: int("Tide number"), payout: int("1, or 2 on the final tide"), event: str("The event of that tide"), moves: { type: "array", items: obj({ seat: int("Seat"), wreck: int("Wreck id"), air: int("Air"), rest: { type: "boolean" }, auto: { type: "boolean", description: "Timed out, so rested" } }) }, wrecks: { type: "array", items: ref("Result") } });
 const State = obj({
   code: str("Match code"),
   status: str("Match status", { enum: ["lobby", "playing", "finished", "expired"] }),
@@ -27,6 +27,8 @@ const State = obj({
   seats: { type: "array", items: { oneOf: [obj({ seat: int("Seat"), name: str("Name"), kind: str("human or bot") }), { type: "null" }] } },
   players: { type: "array", items: obj({ seat: int("Seat"), name: str("Name"), kind: str("human or bot"), air: int("Air"), pearls: int("Pearls"), submitted: { type: "boolean" } }) },
   wrecks: { type: "array", items: ref("Wreck") },
+  event: { type: ["string", "null"], enum: ["calm", "current", "seam", "bloom", "slack", null], description: "This tide's public event; its text is in rules.eventText" },
+  nextEvent: { type: ["string", "null"], enum: ["calm", "current", "seam", "bloom", "slack", null], description: "Next tide's event, announced one tide ahead" },
   lastReveal: { oneOf: [ref("Reveal"), { type: "null" }] },
   winners: { type: ["array", "null"], items: { type: "integer" } },
   rematch: { type: ["string", "null"], description: "Code of the rematch, once someone asked for one" },

@@ -1,4 +1,4 @@
-import { RULES, createGame, checkMove, normalizeMove, resolveTide } from "../engine.js";
+import { RULES, EVENTS, eventOf, createGame, checkMove, normalizeMove, resolveTide } from "../engine.js";
 import { chooseMove, LEVELS } from "../bots/brain.js";
 
 const BOT_NAMES = ["Coral", "Kelp", "Manta", "Brine", "Nacre", "Squall", "Abyss", "Tern"];
@@ -15,7 +15,10 @@ export const RULES_TEXT =
   "the most, the silt clouds the water and nobody takes it. All Air spent is gone, even if you lose. Unclaimed wrecks " +
   "stay and grow by 1 pearl, and every diver regains 1 Air each tide (up to 10). The eighth and final tide pays " +
   "double: every pearl won on it counts twice. After it, the diver with the most pearls wins; ties go to whoever " +
-  "has more Air left. A diver who does not move before the timer runs out rests.";
+  "has more Air left. A diver who does not move before the timer runs out rests. Four of the first seven tides " +
+  "bring a public event, always announced one tide ahead: Strong current (resting gives +3 Air), Rich seam (the new " +
+  "wreck gets 3 extra pearls), Air pocket bloom (every wreck holds an air pocket) or Slack water (no Air comes back " +
+  "at the end of the tide).";
 
 const MOVE_SHAPE = 'send {"wreck": <id>, "air": <n>} or {"rest": true}';
 
@@ -274,7 +277,7 @@ export class MatchRoom {
     const g = d.game;
     const before = { wrecks: g.wrecks.map((w) => ({ ...w })), players: g.players.map((p) => ({ seat: p.seat, air: p.air, pearls: p.pearls })) };
     const ev = resolveTide(g, g.players.map((p) => d.moves[p.seat]));
-    d.rounds.push({ tide: ev.tide, payout: ev.payout, last: g.finished, before, moves: ev.moves, results: ev.wrecks, standings: ev.standings });
+    d.rounds.push({ tide: ev.tide, payout: ev.payout, event: ev.event, last: g.finished, before, moves: ev.moves, results: ev.wrecks, standings: ev.standings });
     if (g.finished) {
       d.status = "finished";
       d.finishedAt = this.hooks.now();
@@ -316,10 +319,12 @@ export class MatchRoom {
           }))
         : [],
       wrecks: g && !g.finished ? g.wrecks.map((w) => ({ ...w })) : [],
+      event: g && !g.finished ? eventOf(g) : null,
+      nextEvent: g && !g.finished && g.tide < g.tides ? eventOf(g, g.tide + 1) : null,
       lastReveal: g && g.history.length ? g.history[g.history.length - 1] : null,
       winners: g && g.finished ? g.winners : null,
       rematch: d.rematch ? d.rematch.code : null,
-      rules: { text: RULES_TEXT, ...RULES },
+      rules: { text: RULES_TEXT, ...RULES, eventText: EVENTS },
     };
     if (seat !== null) {
       st.you = { seat, name: d.seats[seat].name, isHost: seat === 0, move: d.moves[seat] || null };
@@ -398,7 +403,7 @@ export class MatchRoom {
           status: d.status,
           seed: d.status === "finished" ? d.seed : null,
           settings: d.settings,
-          rules: RULES,
+          rules: { ...RULES, eventText: EVENTS },
           names: d.seats.map((s) => s && s.name),
           kinds: d.seats.map((s) => s && s.kind),
           rounds: d.rounds,

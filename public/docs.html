@@ -19,10 +19,19 @@
 <li>Each tide, in secret, either dive to one wreck and spend some of your Air on it, or rest to gain 2 Air.</li>
 <li>At each wreck the diver who spent the most Air takes its pearls. A tie for the most means nobody does, and spent Air is gone either way.</li>
 <li>Wrecks nobody claims grow, and the last tide pays double, so saving Air for the right moment matters.</li>
+<li>Four tides bring a public event (strong current, rich seam, air pocket bloom, slack water), always announced one tide ahead.</li>
 </ul>
 <p><b>Writing a bot?</b> Three calls are enough: create a match, long-poll its state, send a move. See <a href="#agent-api">Agent API</a> below, or run <code>python3 bots/sample_bot.py</code> (or <code>node bots/sample_bot.mjs</code>) to watch one play a full match.</p>
 <h2 id="full-rules">Full rules</h2>
 <p>Two to four divers race through eight tides. Each tide, wrecks lie on the seabed (one fewer than the number of divers, at least two), each holding pearls (the points) and sometimes an air pocket (+3 Air for whoever claims it). In secret, every diver either dives to one wreck, spending at least 1 Air on it, or rests to gain 2 Air. When everyone has chosen, the choices are revealed: at each wreck the single diver who spent the most Air takes its pearls and air pocket, but if two or more divers tie for the most, nobody takes it. All Air spent on a dive is gone, even if you lose. Wrecks nobody claimed stay and grow by 1 pearl. After every tide each diver regains 1 Air (maximum 10). You start with 5 Air. The eighth and final tide pays double: every pearl won on it counts twice. After it, the diver with the most pearls wins; ties go to the diver with more Air left. If you do not move before the timer runs out, you rest.</p>
+<p><b>Tide events.</b> Four of the first seven tides bring a public event, dealt from the match seed and always shown one tide ahead (the final tide is never an event, it already pays double):</p>
+<ul>
+<li><b>Strong current:</b> resting this tide gives +3 Air instead of +2.</li>
+<li><b>Rich seam:</b> the new wreck that appears this tide starts with 3 extra pearls.</li>
+<li><b>Air pocket bloom:</b> every wreck on the table this tide holds an air pocket (+3 Air for whoever claims it).</li>
+<li><b>Slack water:</b> no Air comes back at the end of this tide.</li>
+</ul>
+<p>The other tides are calm.</p>
 <h2 id="play-in-the-browser">Play in the browser</h2>
 <p>Open the URL, press "Play vs bot now", or create a match and share the 5-letter code or the invite link. The host can add bots or press Start (empty seats are filled by bots). Spectators can open <code>/m/CODE</code>, finished matches have a replay at <code>/replay/CODE</code>.</p>
 <h2 id="run-it-yourself">Run it yourself</h2>
@@ -54,7 +63,7 @@ curl -s "$BASE/api/matches/CODE?wait=0" -H "Authorization: Bearer TOKEN"
 curl -s -X POST $BASE/api/matches/CODE/move -H "Authorization: Bearer TOKEN" -d '{"wreck":1,"air":2}'
 curl -s -X POST $BASE/api/matches/CODE/move -H "Authorization: Bearer TOKEN" -d '{"rest":true}'</code></pre>
 <p><b>Tokens.</b> Every human seat gets its own token from create or join. Send it as <code>Authorization: Bearer &lt;token&gt;</code> (a <code>token</code> field in a JSON body also works). Bots need no token. Match codes are 5 letters and digits and are not case sensitive.</p>
-<p><b>State fields.</b> <code>code</code>, <code>status</code> (<code>lobby</code>, <code>playing</code>, <code>finished</code>), <code>version</code> (goes up on every change, including other players locking in, so after a move keep long-polling until <code>tide</code> changes), <code>settings</code> (<code>seats, turnSeconds, botLevel</code>), <code>tide</code> (1-8) and <code>tides</code> (8), <code>serverTime</code>, <code>deadline</code> and <code>pauseUntil</code> (ms; after each tide there is a 4 s reveal pause and the turn timer starts when it ends, but moves are accepted during the pause too), <code>secondsLeft</code>, <code>host</code> (always seat 0), <code>seats</code> (a list of <code>{seat, name, kind}</code>, or <code>null</code> for an empty seat), <code>players</code> (<code>seat, name, kind, air, pearls, submitted</code>), <code>wrecks</code> (<code>id, pearls, air, age</code>: <code>air</code> is the air pocket, <code>age</code> is how many tides it went unclaimed), <code>lastReveal</code> (the previous tide with everyone's choices and per-wreck <code>divers, winner, tie, gain</code>), <code>winners</code> (seats, when finished), <code>rematch</code> (the new match's code once someone asked for a rematch, else <code>null</code>), <code>rules</code>, and with a token <code>you</code> (<code>seat, name, isHost, move</code>, and <code>legal: {rest, wrecks, minAir, maxAir}</code> only while playing; <code>wrecks</code> is the list of wreck ids you may dive to). Wreck ids keep increasing during a match, so always read them from <code>wrecks</code>.</p>
+<p><b>State fields.</b> <code>code</code>, <code>status</code> (<code>lobby</code>, <code>playing</code>, <code>finished</code>), <code>version</code> (goes up on every change, including other players locking in, so after a move keep long-polling until <code>tide</code> changes), <code>settings</code> (<code>seats, turnSeconds, botLevel</code>), <code>tide</code> (1-8) and <code>tides</code> (8), <code>serverTime</code>, <code>deadline</code> and <code>pauseUntil</code> (ms; after each tide there is a 4 s reveal pause and the turn timer starts when it ends, but moves are accepted during the pause too), <code>secondsLeft</code>, <code>host</code> (always seat 0), <code>seats</code> (a list of <code>{seat, name, kind}</code>, or <code>null</code> for an empty seat), <code>players</code> (<code>seat, name, kind, air, pearls, submitted</code>), <code>wrecks</code> (<code>id, pearls, air, age</code>: <code>air</code> is the air pocket, <code>age</code> is how many tides it went unclaimed), <code>event</code> and <code>nextEvent</code> (this tide's and the next tide's event: <code>calm</code>, <code>current</code>, <code>seam</code>, <code>bloom</code> or <code>slack</code>; the text for each is in <code>rules.eventText</code>, and bloom and seam are already applied to <code>wrecks</code>), <code>lastReveal</code> (the previous tide with everyone's choices and per-wreck <code>divers, winner, tie, gain</code>), <code>winners</code> (seats, when finished), <code>rematch</code> (the new match's code once someone asked for a rematch, else <code>null</code>), <code>rules</code>, and with a token <code>you</code> (<code>seat, name, isHost, move</code>, and <code>legal: {rest, wrecks, minAir, maxAir}</code> only while playing; <code>wrecks</code> is the list of wreck ids you may dive to). Wreck ids keep increasing during a match, so always read them from <code>wrecks</code>.</p>
 <p><b>Example state</b> (3 seats, start of tide 2, seen by seat 0 with its token; <code>rules</code> left out). In tide 1 seat 0 spent 3 Air on wreck 1 and beat seat 2's 1 Air, so it took 5 pearls; nobody dived to wreck 2, so it stays and grows to 4 pearls, and a new wreck 3 surfaced.</p>
 <pre><code>{
   "code": "7RDYQ", "status": "playing", "version": 5, "tide": 2, "tides": 8,
@@ -68,8 +77,9 @@ curl -s -X POST $BASE/api/matches/CODE/move -H "Authorization: Bearer TOKEN" -d 
     {"seat": 2, "name": "Bot Tern", "kind": "bot", "air": 5, "pearls": 0, "submitted": false}
   ],
   "wrecks": [{"id": 2, "pearls": 4, "air": 0, "age": 1}, {"id": 3, "pearls": 7, "air": 0, "age": 0}],
+  "event": "calm", "nextEvent": "current",
   "lastReveal": {
-    "tide": 1, "payout": 1,
+    "tide": 1, "payout": 1, "event": "calm",
     "moves": [{"seat": 0, "wreck": 1, "air": 3}, {"seat": 1, "rest": true}, {"seat": 2, "wreck": 1, "air": 1}],
     "wrecks": [
       {"id": 1, "pearls": 5, "air": 0, "divers": [{"seat": 0, "air": 3}, {"seat": 2, "air": 1}], "winner": 0, "tie": false, "gain": 5},
@@ -104,15 +114,15 @@ while True:
 <h2 id="design-notes">Design notes</h2>
 <p>Every tide is a bet: diving big wins a wreck but burns Air you need later, tying wastes everyone's Air, and resting is safe but leaves wrecks to rivals. <code>node sim.js</code> plays thousands of seeded games between fixed strategies and the built-in bots (10,000 games per row). Each row is one strategy against a field of normal bots; a fair share is 50 / 33 / 25 percent for 2 / 3 / 4 players:</p>
 <div class="tablewrap"><table><thead><tr><th scope="col">Strategy</th><th scope="col">2 players</th><th scope="col">3 players</th><th scope="col">4 players</th></tr></thead><tbody>
-<tr><td>hard bot</td><td>66.8</td><td>62.0</td><td>49.5</td></tr>
-<tr><td>normal bot</td><td>49.4</td><td>34.1</td><td>25.2</td></tr>
-<tr><td>rest-heavy</td><td>41.0</td><td>38.2</td><td>30.2</td></tr>
-<tr><td>always big bid</td><td>37.3</td><td>18.7</td><td>16.9</td></tr>
-<tr><td>easy bot</td><td>17.9</td><td>23.5</td><td>14.4</td></tr>
-<tr><td>random</td><td>16.7</td><td>22.6</td><td>15.2</td></tr>
-<tr><td>cheap 1-Air dodger</td><td>12.0</td><td>17.9</td><td>9.1</td></tr>
+<tr><td>hard bot</td><td>69.0</td><td>62.9</td><td>51.2</td></tr>
+<tr><td>normal bot</td><td>50.3</td><td>33.5</td><td>25.4</td></tr>
+<tr><td>rest-heavy</td><td>44.8</td><td>35.9</td><td>30.0</td></tr>
+<tr><td>always big bid</td><td>37.9</td><td>19.4</td><td>16.7</td></tr>
+<tr><td>easy bot</td><td>16.6</td><td>21.1</td><td>13.4</td></tr>
+<tr><td>random</td><td>16.1</td><td>21.7</td><td>13.4</td></tr>
+<tr><td>cheap 1-Air dodger</td><td>12.1</td><td>18.3</td><td>9.6</td></tr>
 </tbody></table></div>
-<p>No fixed strategy wins everywhere. Big bids fall apart with more players, and rest-heavy play is a little ahead at three and four players but loses at two and is easy to read once you see it. The hard bot looks one tide ahead and plays against what normal bots would do, so it beats them clearly. In a mixed table, where every seat is drawn at random from all seven strategies, it is not on top: at three players the normal bot takes 44.7 percent, the hard bot 43.4 and rest-heavy 40.0, because the hard bot never adapts to how a real opponent plays.</p>
+<p>No fixed strategy wins everywhere. Big bids fall apart with more players, and rest-heavy play is a little ahead at three and four players but loses at two and is easy to read once you see it. The hard bot looks one tide ahead and plays against what normal bots would do, so it beats them clearly. In a mixed table, where every seat is drawn at random from all the strategies (the sample bot included), it is not on top: at three players the normal bot takes 48.0 percent, the hard bot 45.5 and rest-heavy 40.0, because the hard bot never adapts to how a real opponent plays. Tide events (on in all of these numbers) break up the middle of the match without favouring one style: compared with the same table run without them, no row moved by more than 4 points.</p>
 <h2 id="license">License</h2>
 <p>MIT, see <code>LICENSE</code>.</p>
 </main>

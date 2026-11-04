@@ -1,4 +1,4 @@
-import { RULES } from "../engine.js";
+import { RULES, EVENTS } from "../engine.js";
 import { RULES_TEXT, ApiError, parseCreate } from "./room.js";
 import { openapi } from "./openapi.js";
 
@@ -11,7 +11,7 @@ export async function route(store, req) {
   }
   if (parts[0] === "rules") {
     if (method !== "GET") throw new ApiError(405, "use GET");
-    return { status: 200, json: { ...RULES, text: RULES_TEXT } };
+    return { status: 200, json: { ...RULES, eventText: EVENTS, text: RULES_TEXT } };
   }
   if (parts[0] === "openapi.json" && parts.length === 1) {
     if (method !== "GET") throw new ApiError(405, "use GET");

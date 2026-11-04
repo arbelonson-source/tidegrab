@@ -1,4 +1,4 @@
-import { RULES, payout } from "../engine.js";
+import { RULES, payout, eventOf, restGain, tideGain } from "../engine.js";
 
 const pick = (arr, rnd) => arr[Math.floor(rnd() * arr.length)];
 
@@ -22,7 +22,11 @@ function easyMove(g, seat, rnd) {
 function airValue(g) {
   const left = g.tides - g.tide;
   if (left <= 0) return 0.03;
-  return Math.min(1.0, 0.12 + 0.11 * left);
+  let v = Math.min(1.0, 0.12 + 0.11 * left);
+  if (eventOf(g) === "slack") v *= 1.15;
+  const next = eventOf(g, g.tide + 1);
+  if (next === "seam" || next === "bloom") v *= 1.15;
+  return Math.min(1.2, v);
 }
 
 function wreckValue(w, lam, mult = 1) {
@@ -49,7 +53,7 @@ function normalMove(g, seat, rnd) {
   const me = g.players[seat];
   const lam = airValue(g);
   const models = g.players.map((p, i) => (i === seat ? null : rivalModel(g, p, lam)));
-  const options = [{ move: { rest: true }, ev: 2 * lam * 1.3 }];
+  const options = [{ move: { rest: true }, ev: restGain(g) * lam * 1.3 }];
   g.wrecks.forEach((w, wi) => {
     const prize = wreckValue(w, lam, payout(g));
     for (let b = 1; b <= me.air; b++) {
@@ -77,7 +81,7 @@ function normalMove(g, seat, rnd) {
 // model, then pick the move that leaves us furthest ahead on average.
 function settle(g, moves, seat, lam, mult, last) {
   const pearls = g.players.map((p) => p.pearls);
-  const air = g.players.map((p, i) => p.air + (moves[i].rest ? RULES.restGain : -moves[i].air));
+  const air = g.players.map((p, i) => p.air + (moves[i].rest ? restGain(g) : -moves[i].air));
   for (const w of g.wrecks) {
     let top = 0, who = -1;
     moves.forEach((m, i) => {
@@ -86,7 +90,7 @@ function settle(g, moves, seat, lam, mult, last) {
     });
     if (who >= 0) { pearls[who] += w.pearls * mult; air[who] += w.air; }
   }
-  const val = (i) => pearls[i] + lam * Math.min(RULES.maxAir, air[i] + RULES.tideGain);
+  const val = (i) => pearls[i] + lam * Math.min(RULES.maxAir, air[i] + tideGain(g));
   let rival = -Infinity;
   for (let i = 0; i < pearls.length; i++) if (i !== seat) rival = Math.max(rival, val(i));
   const lead = val(seat) - rival;

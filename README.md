@@ -10,12 +10,22 @@ A small turn-based strategy game of secret bids for 2 to 4 players, humans in th
 - Each tide, in secret, either dive to one wreck and spend some of your Air on it, or rest to gain 2 Air.
 - At each wreck the diver who spent the most Air takes its pearls. A tie for the most means nobody does, and spent Air is gone either way.
 - Wrecks nobody claims grow, and the last tide pays double, so saving Air for the right moment matters.
+- Four tides bring a public event (strong current, rich seam, air pocket bloom, slack water), always announced one tide ahead.
 
 **Writing a bot?** Three calls are enough: create a match, long-poll its state, send a move. See [Agent API](#agent-api) below, or run `python3 bots/sample_bot.py` (or `node bots/sample_bot.mjs`) to watch one play a full match.
 
 ## Full rules
 
 Two to four divers race through eight tides. Each tide, wrecks lie on the seabed (one fewer than the number of divers, at least two), each holding pearls (the points) and sometimes an air pocket (+3 Air for whoever claims it). In secret, every diver either dives to one wreck, spending at least 1 Air on it, or rests to gain 2 Air. When everyone has chosen, the choices are revealed: at each wreck the single diver who spent the most Air takes its pearls and air pocket, but if two or more divers tie for the most, nobody takes it. All Air spent on a dive is gone, even if you lose. Wrecks nobody claimed stay and grow by 1 pearl. After every tide each diver regains 1 Air (maximum 10). You start with 5 Air. The eighth and final tide pays double: every pearl won on it counts twice. After it, the diver with the most pearls wins; ties go to the diver with more Air left. If you do not move before the timer runs out, you rest.
+
+**Tide events.** Four of the first seven tides bring a public event, dealt from the match seed and always shown one tide ahead (the final tide is never an event, it already pays double):
+
+- **Strong current:** resting this tide gives +3 Air instead of +2.
+- **Rich seam:** the new wreck that appears this tide starts with 3 extra pearls.
+- **Air pocket bloom:** every wreck on the table this tide holds an air pocket (+3 Air for whoever claims it).
+- **Slack water:** no Air comes back at the end of this tide.
+
+The other tides are calm.
 
 ## Play in the browser
 
@@ -63,7 +73,7 @@ curl -s -X POST $BASE/api/matches/CODE/move -H "Authorization: Bearer TOKEN" -d 
 
 **Tokens.** Every human seat gets its own token from create or join. Send it as `Authorization: Bearer <token>` (a `token` field in a JSON body also works). Bots need no token. Match codes are 5 letters and digits and are not case sensitive.
 
-**State fields.** `code`, `status` (`lobby`, `playing`, `finished`), `version` (goes up on every change, including other players locking in, so after a move keep long-polling until `tide` changes), `settings` (`seats, turnSeconds, botLevel`), `tide` (1-8) and `tides` (8), `serverTime`, `deadline` and `pauseUntil` (ms; after each tide there is a 4 s reveal pause and the turn timer starts when it ends, but moves are accepted during the pause too), `secondsLeft`, `host` (always seat 0), `seats` (a list of `{seat, name, kind}`, or `null` for an empty seat), `players` (`seat, name, kind, air, pearls, submitted`), `wrecks` (`id, pearls, air, age`: `air` is the air pocket, `age` is how many tides it went unclaimed), `lastReveal` (the previous tide with everyone's choices and per-wreck `divers, winner, tie, gain`), `winners` (seats, when finished), `rematch` (the new match's code once someone asked for a rematch, else `null`), `rules`, and with a token `you` (`seat, name, isHost, move`, and `legal: {rest, wrecks, minAir, maxAir}` only while playing; `wrecks` is the list of wreck ids you may dive to). Wreck ids keep increasing during a match, so always read them from `wrecks`.
+**State fields.** `code`, `status` (`lobby`, `playing`, `finished`), `version` (goes up on every change, including other players locking in, so after a move keep long-polling until `tide` changes), `settings` (`seats, turnSeconds, botLevel`), `tide` (1-8) and `tides` (8), `serverTime`, `deadline` and `pauseUntil` (ms; after each tide there is a 4 s reveal pause and the turn timer starts when it ends, but moves are accepted during the pause too), `secondsLeft`, `host` (always seat 0), `seats` (a list of `{seat, name, kind}`, or `null` for an empty seat), `players` (`seat, name, kind, air, pearls, submitted`), `wrecks` (`id, pearls, air, age`: `air` is the air pocket, `age` is how many tides it went unclaimed), `event` and `nextEvent` (this tide's and the next tide's event: `calm`, `current`, `seam`, `bloom` or `slack`; the text for each is in `rules.eventText`, and bloom and seam are already applied to `wrecks`), `lastReveal` (the previous tide with everyone's choices and per-wreck `divers, winner, tie, gain`), `winners` (seats, when finished), `rematch` (the new match's code once someone asked for a rematch, else `null`), `rules`, and with a token `you` (`seat, name, isHost, move`, and `legal: {rest, wrecks, minAir, maxAir}` only while playing; `wrecks` is the list of wreck ids you may dive to). Wreck ids keep increasing during a match, so always read them from `wrecks`.
 
 **Example state** (3 seats, start of tide 2, seen by seat 0 with its token; `rules` left out). In tide 1 seat 0 spent 3 Air on wreck 1 and beat seat 2's 1 Air, so it took 5 pearls; nobody dived to wreck 2, so it stays and grows to 4 pearls, and a new wreck 3 surfaced.
 
@@ -80,8 +90,9 @@ curl -s -X POST $BASE/api/matches/CODE/move -H "Authorization: Bearer TOKEN" -d 
     {"seat": 2, "name": "Bot Tern", "kind": "bot", "air": 5, "pearls": 0, "submitted": false}
   ],
   "wrecks": [{"id": 2, "pearls": 4, "air": 0, "age": 1}, {"id": 3, "pearls": 7, "air": 0, "age": 0}],
+  "event": "calm", "nextEvent": "current",
   "lastReveal": {
-    "tide": 1, "payout": 1,
+    "tide": 1, "payout": 1, "event": "calm",
     "moves": [{"seat": 0, "wreck": 1, "air": 3}, {"seat": 1, "rest": true}, {"seat": 2, "wreck": 1, "air": 1}],
     "wrecks": [
       {"id": 1, "pearls": 5, "air": 0, "divers": [{"seat": 0, "air": 3}, {"seat": 2, "air": 1}], "winner": 0, "tie": false, "gain": 5},
@@ -130,15 +141,15 @@ Every tide is a bet: diving big wins a wreck but burns Air you need later, tying
 
 | Strategy | 2 players | 3 players | 4 players |
 |---|---|---|---|
-| hard bot | 66.8 | 62.0 | 49.5 |
-| normal bot | 49.4 | 34.1 | 25.2 |
-| rest-heavy | 41.0 | 38.2 | 30.2 |
-| always big bid | 37.3 | 18.7 | 16.9 |
-| easy bot | 17.9 | 23.5 | 14.4 |
-| random | 16.7 | 22.6 | 15.2 |
-| cheap 1-Air dodger | 12.0 | 17.9 | 9.1 |
+| hard bot | 69.0 | 62.9 | 51.2 |
+| normal bot | 50.3 | 33.5 | 25.4 |
+| rest-heavy | 44.8 | 35.9 | 30.0 |
+| always big bid | 37.9 | 19.4 | 16.7 |
+| easy bot | 16.6 | 21.1 | 13.4 |
+| random | 16.1 | 21.7 | 13.4 |
+| cheap 1-Air dodger | 12.1 | 18.3 | 9.6 |
 
-No fixed strategy wins everywhere. Big bids fall apart with more players, and rest-heavy play is a little ahead at three and four players but loses at two and is easy to read once you see it. The hard bot looks one tide ahead and plays against what normal bots would do, so it beats them clearly. In a mixed table, where every seat is drawn at random from all seven strategies, it is not on top: at three players the normal bot takes 44.7 percent, the hard bot 43.4 and rest-heavy 40.0, because the hard bot never adapts to how a real opponent plays.
+No fixed strategy wins everywhere. Big bids fall apart with more players, and rest-heavy play is a little ahead at three and four players but loses at two and is easy to read once you see it. The hard bot looks one tide ahead and plays against what normal bots would do, so it beats them clearly. In a mixed table, where every seat is drawn at random from all the strategies (the sample bot included), it is not on top: at three players the normal bot takes 48.0 percent, the hard bot 45.5 and rest-heavy 40.0, because the hard bot never adapts to how a real opponent plays. Tide events (on in all of these numbers) break up the middle of the match without favouring one style: compared with the same table run without them, no row moved by more than 4 points.
 
 ## License
 

@@ -11,6 +11,9 @@ export const RULES = Object.freeze({
   maxPearls: 12,
   airPocket: 3,
   finalPayout: 2,
+  eventTides: 4,
+  currentRest: 3,
+  seamBonus: 3,
   minPlayers: 2,
   maxPlayers: 4,
 });
@@ -18,6 +21,40 @@ export const RULES = Object.freeze({
 // The last tide pays every pearl twice, so a lead is never safe until the end.
 export function payout(g) {
   return g.tide >= g.tides ? RULES.finalPayout : 1;
+}
+
+// One public event per tide, dealt from the seed. Tide 8 is always calm because it already pays double.
+export const EVENTS = Object.freeze({
+  calm: "Calm: nothing special.",
+  current: `Strong current: resting gives +${RULES.currentRest} Air instead of +${RULES.restGain}.`,
+  seam: `Rich seam: the new wreck starts with ${RULES.seamBonus} extra pearls.`,
+  bloom: `Air pocket bloom: every wreck holds an air pocket (+${RULES.airPocket} Air for its winner).`,
+  slack: "Slack water: no Air comes back at the end of this tide.",
+});
+
+export function eventOf(g, tide = g.tide) {
+  return (g.forecast && g.forecast[tide - 1]) || "calm";
+}
+
+export function restGain(g) {
+  return eventOf(g) === "current" ? RULES.currentRest : RULES.restGain;
+}
+
+export function tideGain(g) {
+  return eventOf(g) === "slack" ? 0 : RULES.tideGain;
+}
+
+function dealForecast(seed) {
+  const f = Array(RULES.tides).fill("calm");
+  const g = { rng: (seed ^ 0x9e3779b9) | 0 };
+  const slots = Array.from({ length: RULES.tides - 1 }, (_, i) => i);
+  for (let i = slots.length - 1; i > 0; i--) {
+    const j = Math.floor(random(g) * (i + 1));
+    [slots[i], slots[j]] = [slots[j], slots[i]];
+  }
+  const deck = ["current", "seam", "bloom", "slack"];
+  for (const t of slots.slice(0, RULES.eventTides)) f[t] = deck[Math.floor(random(g) * deck.length)];
+  return f;
 }
 
 export function wreckCount(players) {
@@ -43,7 +80,18 @@ function newWreck(g) {
 }
 
 function refill(g) {
-  while (g.wrecks.length < wreckCount(g.players.length)) g.wrecks.push(newWreck(g));
+  const fresh = [];
+  while (g.wrecks.length < wreckCount(g.players.length)) {
+    const w = newWreck(g);
+    g.wrecks.push(w);
+    fresh.push(w);
+  }
+  const ev = eventOf(g);
+  if (ev === "bloom") for (const w of g.wrecks) if (!w.air) w.air = RULES.airPocket;
+  if (ev === "seam") {
+    const w = fresh.length ? fresh[fresh.length - 1] : g.wrecks.reduce((a, b) => (b.pearls < a.pearls ? b : a));
+    w.pearls = Math.min(RULES.maxPearls, w.pearls + RULES.seamBonus);
+  }
 }
 
 export function createGame(names, seed) {
@@ -59,6 +107,7 @@ export function createGame(names, seed) {
     rng: seed | 0,
     nextWreckId: 1,
     history: [],
+    forecast: dealForecast(seed),
   };
   refill(g);
   return g;
@@ -92,7 +141,7 @@ export function resolveTide(g, moves) {
 
   for (const m of taken) {
     const p = g.players[m.seat];
-    if (m.rest) p.air += RULES.restGain;
+    if (m.rest) p.air += restGain(g);
     else p.air -= m.air;
   }
 
@@ -115,12 +164,14 @@ export function resolveTide(g, moves) {
     }
   }
 
-  for (const p of g.players) p.air = Math.min(RULES.maxAir, p.air + RULES.tideGain);
+  const regen = tideGain(g);
+  for (const p of g.players) p.air = Math.min(RULES.maxAir, p.air + regen);
 
   g.wrecks = kept;
   const event = {
     tide: g.tide,
     payout: mult,
+    event: eventOf(g),
     moves: taken,
     wrecks: outcome,
     standings: g.players.map((p) => ({ seat: p.seat, air: p.air, pearls: p.pearls })),
