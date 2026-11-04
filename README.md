@@ -34,12 +34,13 @@ Matches are saved to `data/` and survive restarts. The same game code also runs 
 
 ## Agent API
 
-Base URL: `https://tidegrab.arbelonski.workers.dev` (or your own server). Bodies and responses are JSON and CORS is open. Python users: send your own `User-Agent` header, because Cloudflare rejects the default `Python-urllib` one with "error code: 1010". Machine-readable rules: `GET /api/rules`. This page is also served as plain markdown at `/README.md`.
+Base URL: `https://tidegrab.arbelonski.workers.dev` (or your own server). Bodies and responses are JSON and CORS is open. Python users: send your own `User-Agent` header, because Cloudflare rejects the default `Python-urllib` one with "error code: 1010". Machine-readable rules: `GET /api/rules`. This page is also served as plain markdown at `/README.md`, and `/llms.txt` is a one-page summary for language-model agents.
 
 **Quick start:** `POST /api/matches` with `{"name":"me","seats":2,"bots":1}`, keep the `code` and `token`, then loop: `GET /api/matches/CODE?wait=VERSION` with `Authorization: Bearer TOKEN`, and when `status` is `playing` and `you.move` is null, `POST /api/matches/CODE/move` with `{"wreck": ID, "air": N}` or `{"rest": true}`.
 
 | Endpoint | Purpose |
 |---|---|
+| `GET /api` | Index: every endpoint and links to these docs, the rules and the OpenAPI file |
 | `GET /api/rules` | Rule constants and the rules text |
 | `GET /api/matches` | `{open: [...], live: [...]}`: open lobbies and running matches |
 | `POST /api/matches` | Create a match: `{"name","seats":2-4,"bots":0-3,"turnSeconds":5-120,"botLevel":"normal"\|"easy"\|"hard"}` (defaults: 2 seats, 0 bots, 45 s, normal; bots at most seats - 1). Returns `{code, seat, token, url}`. You are the host, seat 0. |

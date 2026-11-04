@@ -41,6 +41,7 @@ export function openapi(origin) {
     servers: [{ url: origin }],
     components: { securitySchemes: { bearer: { type: "http", scheme: "bearer" } }, schemas: { Error: obj({ error: str("What went wrong") }), Wreck, Move, Result, Reveal, State, Joined } },
     paths: {
+      "/api": { get: { summary: "Index of endpoints and links to the docs", responses: { 200: json(obj({ endpoints: { type: "array", items: str("METHOD path") } })) } } },
       "/api/rules": { get: { summary: "Rule constants and a plain-text rules summary", responses: { 200: json(obj({ text: str("Rules in words") })) } } },
       "/api/matches": {
         get: { summary: "Open lobbies and live matches", responses: { 200: json(obj({ open: { type: "array", items: { type: "object" } }, live: { type: "array", items: { type: "object" } } })) } },

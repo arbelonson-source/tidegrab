@@ -14,6 +14,7 @@ const MIME = {
   ".svg": "image/svg+xml",
   ".json": "application/json",
   ".md": "text/markdown; charset=utf-8",
+  ".txt": "text/plain; charset=utf-8",
   ".png": "image/png",
   ".ico": "image/x-icon",
 };
@@ -217,7 +218,7 @@ export function startServer(opts = {}) {
       const ip = (trustProxy && String(req.headers["x-forwarded-for"] || "").split(",")[0].trim()) || req.socket.remoteAddress || "?";
       if (req.method === "OPTIONS") return send(res, 204, {});
       if (url.pathname === "/healthz") return send(res, 200, { ok: true, matches: rooms.size });
-      if (url.pathname.startsWith("/api/")) {
+      if (url.pathname === "/api" || url.pathname.startsWith("/api/")) {
         rateLimit(ipKey(ip) || "?");
         return await api(req, res, url, ip === "?" ? null : ip);
       }

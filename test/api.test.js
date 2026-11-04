@@ -72,9 +72,18 @@ test("lobby: join, add bots, start", async () => {
   assert.equal(s.players.filter((p) => p.kind === "bot").length, 1);
 });
 
-test("rules and health endpoints", async () => {
+test("rules, health and index endpoints", async () => {
   assert.equal((await call("/healthz")).json.ok, true);
   assert.equal((await call("/api/rules")).json.tides, 8);
+  const idx = await call("/api");
+  assert.equal(idx.status, 200);
+  assert.ok(idx.json.endpoints.includes("POST /api/matches/CODE/move"));
+  assert.equal((await call("/api/")).json.openapi, idx.json.openapi);
+  for (const f of ["/llms.txt", "/robots.txt"]) {
+    const r = await fetch(base + f);
+    assert.equal(r.status, 200, f);
+    assert.match(r.headers.get("content-type"), /text\/plain/);
+  }
 });
 
 test("move shapes: rest:false dives, mixed or empty moves explain themselves", async () => {
@@ -130,7 +139,7 @@ test("openapi description lists every endpoint", async () => {
   const r = await call("/api/openapi.json");
   assert.equal(r.status, 200);
   assert.equal(r.json.openapi, "3.1.0");
-  for (const p of ["/api/rules", "/api/matches", "/api/matches/{code}", "/api/matches/{code}/join", "/api/matches/{code}/bots", "/api/matches/{code}/start", "/api/matches/{code}/move", "/api/matches/{code}/log", "/healthz"]) assert.ok(r.json.paths[p], p);
+  for (const p of ["/api", "/api/rules", "/api/matches", "/api/matches/{code}", "/api/matches/{code}/join", "/api/matches/{code}/bots", "/api/matches/{code}/start", "/api/matches/{code}/move", "/api/matches/{code}/log", "/healthz"]) assert.ok(r.json.paths[p], p);
   const refs = JSON.stringify(r.json).match(/#\/components\/schemas\/\w+/g);
   for (const ref of refs) assert.ok(r.json.components.schemas[ref.split("/").pop()], ref);
 });

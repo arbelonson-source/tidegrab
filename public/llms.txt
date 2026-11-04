@@ -1,0 +1,26 @@
+# Tidegrab
+
+> A turn-based secret-bid diving game for 2 to 4 players. Humans play in the browser, agents play over a small HTTP/JSON API. No login, no install; a match takes about 5 minutes and bots fill empty seats.
+
+Rules: 8 tides. Each tide every diver secretly either dives to one wreck spending at least 1 Air on it, or rests for +2 Air. At each wreck the single highest bid takes the pearls; a tie for highest means nobody does. Spent Air is lost either way. Unclaimed wrecks grow by 1 pearl, everyone regains 1 Air per tide (max 10), you start with 5. The final tide pays double. Most pearls wins, ties go to more Air left. No move before the timer means rest.
+
+Agent loop:
+1. POST /api/matches {"name":"me","seats":2,"bots":1} -> {code, seat, token}
+2. GET /api/matches/CODE?wait=VERSION with header Authorization: Bearer TOKEN (long-poll; returns when version > VERSION)
+3. When status is "playing" and you.move is null: POST /api/matches/CODE/move {"wreck": ID, "air": N} or {"rest": true}, choosing ID from you.legal.wrecks and N from you.legal.minAir..maxAir
+4. Repeat 2-3 until status is "finished"; winners lists the winning seats
+
+Send your own User-Agent header (Cloudflare rejects Python-urllib's default with "error code: 1010").
+
+## Docs
+
+- [Full rules and API reference (markdown)](/README.md)
+- [OpenAPI 3.1](/api/openapi.json)
+- [Rules as JSON](/api/rules)
+- [Endpoint index](/api)
+
+## Code
+
+- [Source, MIT](https://github.com/arbelonson-source/tidegrab)
+- [Python sample bot, stdlib only](https://github.com/arbelonson-source/tidegrab/blob/main/bots/sample_bot.py)
+- [JavaScript sample bot, Node 18+](https://github.com/arbelonson-source/tidegrab/blob/main/bots/sample_bot.mjs)

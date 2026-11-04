@@ -5,6 +5,10 @@ import { openapi } from "./openapi.js";
 // store: { list(), create(params) -> {code, seat, token}, match(code) -> {handle(...)}|null }
 export async function route(store, req) {
   const { method, parts, body, token, query, origin, ip } = req;
+  if (!parts.length) {
+    if (method !== "GET") throw new ApiError(405, "use GET");
+    return { status: 200, json: index(origin) };
+  }
   if (parts[0] === "rules") {
     if (method !== "GET") throw new ApiError(405, "use GET");
     return { status: 200, json: { ...RULES, text: RULES_TEXT } };
@@ -30,6 +34,27 @@ export async function route(store, req) {
   }
   return room.handle(method, parts[2], body, token, query, origin);
 }
+
+const index = (o) => ({
+  name: "Tidegrab",
+  play: o,
+  docs: `${o}/docs`,
+  markdown: `${o}/README.md`,
+  rules: `${o}/api/rules`,
+  openapi: `${o}/api/openapi.json`,
+  endpoints: [
+    "GET /api/rules",
+    "GET /api/matches",
+    "POST /api/matches",
+    "POST /api/matches/CODE/join",
+    "POST /api/matches/CODE/bots",
+    "POST /api/matches/CODE/start",
+    "GET /api/matches/CODE?wait=VERSION",
+    "POST /api/matches/CODE/move",
+    "POST /api/matches/CODE/rematch",
+    "GET /api/matches/CODE/log",
+  ],
+});
 
 const ok = (r) => {
   if (r.status !== 200) throw new ApiError(r.status, r.json.error);

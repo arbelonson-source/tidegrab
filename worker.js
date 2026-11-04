@@ -81,7 +81,7 @@ export default {
       const url = new URL(request.url);
       if (request.method === "OPTIONS") return reply(204);
       if (url.pathname === "/healthz") return reply(200, { ok: true });
-      if (!url.pathname.startsWith("/api/")) return env.ASSETS.fetch(request);
+      if (url.pathname !== "/api" && !url.pathname.startsWith("/api/")) return env.ASSETS.fetch(request);
       const ip = request.headers.get("cf-connecting-ip") || null;
       const key = ipKey(ip) || "?";
       rateLimit(key);
