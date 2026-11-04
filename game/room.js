@@ -166,6 +166,7 @@ export class MatchRoom {
     this.emoteSeq = 0;
     this.lastEmote = new Map();
     this.watcherEmotes = [];
+    this.reactions = [];
     this.viewers = new Map();
   }
 
@@ -185,7 +186,12 @@ export class MatchRoom {
     };
     const room = new MatchRoom(d, hooks, opts);
     const seat = room.addSeat(params.name, "human");
-    for (let i = 0; i < params.bots; i++) room.addBot();
+    // A rematch brings back the same bot crew (names and levels), so a series has the same rivals.
+    for (let i = 0; i < params.bots; i++) {
+      const c = params.crew && params.crew[i];
+      if (c) room.addSeat(c.name, "bot", c.level);
+      else room.addBot();
+    }
     if (d.seats.every(Boolean)) room.startMatch();
     else room.commit(true);
     return { room, seat, token: d.seats[seat].token };
@@ -229,14 +235,18 @@ export class MatchRoom {
     this.commit(true);
   }
 
-  botDelay() {
-    return this.fast ? 5 + Math.random() * 20 : 500 + Math.random() * 1500;
+  // Bots take a human-ish moment to "think", shorter on fast timers; hard bots a little longer.
+  botDelay(seat) {
+    if (this.fast) return 5 + Math.random() * 20;
+    const top = Math.min(4000, this.d.settings.turnSeconds * 200);
+    const hard = (this.d.seats[seat] && this.d.seats[seat].level || this.d.settings.botLevel) === "hard";
+    return 1000 + Math.random() * Math.max(0, top - 1000) + (hard ? Math.random() * 800 : 0);
   }
 
   dueBots() {
     const d = this.d;
     d.seats.forEach((s, seat) => {
-      if (s.kind === "bot" && !d.moves[seat]) d.botDue[seat] = d.pauseUntil + this.botDelay();
+      if (s.kind === "bot" && !d.moves[seat]) d.botDue[seat] = d.pauseUntil + this.botDelay(seat);
     });
   }
 
@@ -254,6 +264,13 @@ export class MatchRoom {
   }
 
   nextWake() {
+    const d = this.d;
+    const react = this.reactions.length ? this.reactions[0].at : null;
+    const at = this.nextGameWake();
+    return react !== null && (at === null || react < at) ? react : at;
+  }
+
+  nextGameWake() {
     const d = this.d;
     if (d.status === "lobby") return d.createdAt + LOBBY_TTL;
     if (d.status !== "playing") return null;
@@ -277,6 +294,7 @@ export class MatchRoom {
   onWake() {
     const d = this.d;
     const now = this.hooks.now();
+    this.fireReactions(now);
     try {
       if (d.status === "lobby") {
         if (now - d.createdAt >= LOBBY_TTL) {
@@ -367,6 +385,7 @@ export class MatchRoom {
       else d.missed[p.seat] = (d.missed[p.seat] || 0) + 1;
     }
     const ev = resolveTide(g, g.players.map((p) => d.moves[p.seat]));
+    this.botReact(ev, g.finished);
     d.rounds.push({ tide: ev.tide, payout: ev.payout, event: ev.event, last: g.finished, before, moves: ev.moves, results: ev.wrecks, standings: ev.standings });
     if (g.finished) {
       d.status = "finished";
@@ -375,7 +394,9 @@ export class MatchRoom {
       d.botDue = {};
       this.commit(true);
     } else {
-      this.beginTide(this.fast ? 0 : 4000);
+      // A contested tide gets a slightly longer reveal, so the close call can sink in.
+      const contested = ev.wrecks.some((w) => w.divers.length > 1);
+      this.beginTide(this.fast ? 0 : contested ? 4800 : 4000);
       this.commit();
     }
   }
@@ -476,6 +497,42 @@ export class MatchRoom {
 
   // Not saved: bumping the version wakes long-polls without spending a storage write.
   // After a restart the saved version can be lower than a client's ?wait, which answers at once.
+  // Bots react to a reveal a moment after it shows: a silt-out, losing by one, a rich haul, gg at the end.
+  // At most one per tide (two at the end), and like every emote they live in memory only.
+  botReact(ev, finished) {
+    const d = this.d;
+    const bot = (seat) => d.seats[seat] && d.seats[seat].kind === "bot";
+    const picks = [];
+    for (const w of ev.wrecks) {
+      const [top, next] = w.divers;
+      for (const dv of w.divers) {
+        if (!bot(dv.seat)) continue;
+        if (w.tie && dv.air === top.air) picks.push([dv.seat, "wow"]);
+        else if (w.winner !== null && dv.seat !== w.winner && top.air - dv.air === 1) picks.push([dv.seat, "ouch"]);
+        else if (dv.seat === w.winner && w.gain >= 6) picks.push([dv.seat, "pearl"]);
+        else if (dv.seat === w.winner && next && !bot(next.seat) && Math.random() < 0.4) picks.push([dv.seat, "lol"]);
+      }
+    }
+    const bots = d.seats.map((s, i) => (s && s.kind === "bot" ? i : -1)).filter((i) => i >= 0);
+    const chosen = [];
+    if (finished) {
+      const seats = [...bots].sort(() => Math.random() - 0.5).slice(0, 2);
+      for (const seat of seats) if (Math.random() < 0.85) chosen.push([seat, "gg"]);
+    } else if (picks.length && Math.random() < 0.6) chosen.push(picks[Math.floor(Math.random() * picks.length)]);
+    const base = this.hooks.now() + (this.fast ? 5 : 1800);
+    chosen.forEach(([seat, emote], i) => this.reactions.push({ seat, emote, at: base + i * (this.fast ? 5 : 900) + Math.random() * (this.fast ? 5 : 600) }));
+    this.reactions.sort((a, b) => a.at - b.at);
+  }
+
+  fireReactions(now) {
+    while (this.reactions.length && this.reactions[0].at <= now) {
+      const r = this.reactions.shift();
+      try {
+        this.addEmote(r.seat, r.emote);
+      } catch { /* rate-limited: skip it */ }
+    }
+  }
+
   addEmote(seat, emote) {
     const now = this.hooks.now();
     if (seat === null) {
@@ -557,8 +614,8 @@ export class MatchRoom {
       const r = d.rematch || (d.rematch = { code: null, seats: {} });
       if (sub === "rematch:info") {
         if (r.seats[seat]) return { status: 200, json: { mine: r.seats[seat] } };
-        const bots = d.seats.filter((x) => x.kind === "bot").length;
-        return { status: 200, json: { next: r.code, name: d.seats[seat].name, seats: d.settings.seats, bots, turnSeconds: d.settings.turnSeconds, botLevel: d.settings.botLevel } };
+        const crew = d.seats.filter((x) => x.kind === "bot").map((x) => ({ name: x.name, level: x.level || d.settings.botLevel }));
+        return { status: 200, json: { next: r.code, name: d.seats[seat].name, seats: d.settings.seats, bots: crew.length, crew, turnSeconds: d.settings.turnSeconds, botLevel: d.settings.botLevel } };
       }
       const { code, seat: s2, token: t2, url } = body;
       if (!r.code) r.code = code;

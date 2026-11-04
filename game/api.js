@@ -72,7 +72,7 @@ async function rematch(store, room, token, origin, ip) {
   const j = next && (await next.handle("POST", "join", { name: info.name }, null, {}, origin));
   if (j && j.status === 200) made = { code: info.next, ...j.json };
   else {
-    const params = parseCreate({ name: info.name, seats: info.seats, bots: info.bots, turnSeconds: info.turnSeconds, botLevel: info.botLevel });
+    const params = { ...parseCreate({ name: info.name, seats: info.seats, bots: info.bots, turnSeconds: info.turnSeconds, botLevel: info.botLevel }), crew: info.crew };
     const c = await store.create(params, ip);
     made = { code: c.code, seat: c.seat, token: c.token, url: `${origin}/m/${c.code}` };
   }

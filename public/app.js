@@ -378,20 +378,35 @@ const sound = (() => {
 const EV_NAME = { current: "Strong current", seam: "Rich seam", bloom: "Air pocket bloom", slack: "Slack water" };
 const evBadge = (e) => EV_NAME[e] ? h("span", { class: "event" }, EV_NAME[e]) : null;
 
+// Close-call / silt-out banner text for a wreck (null when nothing special).
+function callout(w, last, me) {
+  if (w.tie) return `Silt-out! ${w.pearls} pearl${w.pearls === 1 ? "" : "s"} ${last ? "sink for good" : "stay buried"}`;
+  if (w.winner == null || w.divers.length < 2) return null;
+  const a = w.divers.map((d) => d.air).sort((x, y) => y - x);
+  if (a[0] - a[1] !== 1) return null;
+  const mine = me == null ? null : w.divers.find((x) => x.seat === me);
+  return w.winner === me ? "You won by ONE air!" : mine && mine.air === a[0] - 1 ? "Lost by ONE air" : "Won by ONE air!";
+}
+
+// opts.anim = seconds since a live reveal began: rows pop in smallest bid first, 0.25 s apart (resumes across re-renders).
 function revealPanel(rv, names, title, opts = {}) {
   const last = rv.last ?? rv.payout > 1;
   const nm = (s) => names[s] || "Seat " + (s + 1);
   const rests = rv.moves.filter((m) => m.rest).map((m) => nm(m.seat) + (m.auto ? " (timed out)" : ""));
+  const an = typeof opts.anim === "number", dl = (k) => an ? `--d:${(k * 0.25 - opts.anim).toFixed(2)}s` : null;
   return h("div", {},
     h("h2", {}, title || `Tide ${rv.tide} reveal`, evBadge(rv.event)),
-    h("div", { class: "reveal" }, rv.wrecks.map((w, i) => {
+    h("div", { class: "reveal" + (an ? " stag" : "") }, rv.wrecks.map((w, i) => {
       const verdict = w.winner != null ? `${nm(w.winner)} takes ${w.gain ?? w.pearls} pearl${(w.gain ?? w.pearls) === 1 ? "" : "s"}${(w.gain ?? w.pearls) > w.pearls ? " (doubled)" : ""}${w.air ? " and +" + w.air + " air" : ""}` : w.tie ? (last ? "Silt-out! Tie, nobody takes it" : "Silt-out! Tie, it grows") : last ? "No divers" : "No divers, it grows";
-      return h("div", { class: "rw" + (w.winner != null ? " won" : "") + (w.tie ? " silt" : "") + (!w.divers.length ? " empty" : ""), style: `animation-delay:${i * 0.25}s` },
+      const shown = w.divers.length && !opts.hideBids, n = shown ? w.divers.length : 0, call = shown ? callout(w, last, opts.me) : null;
+      const rank = (d) => [...w.divers].sort((a, b) => a.air - b.air).indexOf(d);
+      return h("div", { class: "rw" + (w.winner != null ? " won" : "") + (w.tie ? " silt" : "") + (!w.divers.length ? " empty" : ""), style: an ? dl(n) : `animation-delay:${i * 0.25}s` },
         h("div", { class: "row sb" }, h("b", {}, `Wreck #${w.id}`), h("span", { class: "pearls" }, icon(PEARL), w.pearls)),
-        w.winner != null ? h("span", { class: "plus", "aria-hidden": "true" }, "+" + (w.gain ?? w.pearls)) : null,
-        w.divers.length && !opts.hideBids ? w.divers.map((d, j) => h("div", { class: "dv" + (w.winner === d.seat && j === 0 ? " top" : "") }, h("span", {}, nm(d.seat)), h("span", {}, d.air + " air"))) : null,
-        h("div", { class: "verdict" }, verdict),
-        why(w) && !opts.hideBids ? h("div", { class: "why" }, why(w)) : null,
+        w.winner != null ? h("span", { class: "plus", "aria-hidden": "true", style: dl(n + 1) }, "+" + (w.gain ?? w.pearls)) : null,
+        shown ? w.divers.map((d, j) => h("div", { class: "dv" + (w.winner === d.seat && j === 0 ? " top" : ""), style: dl(rank(d)) }, h("span", {}, nm(d.seat)), h("span", {}, d.air + " air"))) : null,
+        h("div", { class: "verdict", style: dl(n) }, verdict),
+        call ? h("div", { class: "callout" + (w.tie ? " silt" : ""), "aria-hidden": "true", style: dl(n + 1) }, call) : null,
+        why(w) && !opts.hideBids ? h("div", { class: "why", style: dl(n) }, why(w)) : null,
         lostNote(w, opts.me));
     })),
     rests.length ? h("div", { class: "rests" }, "Rested: " + rests.join(", ")) : null);
@@ -431,6 +446,49 @@ function standings(st, rounds) {
         r ? [h("td", {}, r.won), h("td", {}, r.ties), h("td", {}, r.best ? `#${r.best.id} for ${r.best.gain}` : "-")] : null);
     }))));
 }
+// Tide where the winner took the lead for good (null if led throughout / shared win).
+function turningPoint(rounds, winners) {
+  if (winners.length !== 1 || rounds.length < 2) return null;
+  const w = winners[0], tot = {}; let from = null;
+  for (const r of rounds) {
+    for (const x of r.wrecks) if (x.winner != null) tot[x.winner] = (tot[x.winner] || 0) + (x.gain ?? x.pearls);
+    const mine = tot[w] || 0, lead = Object.entries(tot).every(([k, v]) => +k === w || v < mine);
+    if (!lead) from = null; else if (from == null) from = r.tide;
+  }
+  return from > 1 ? from : null;
+}
+
+// Fun titles from match stats: only unique, non-zero leaders.
+function titles(rounds, players) {
+  const rows = matchStats(rounds, players).rows, out = [];
+  const pick = (title, f) => {
+    const v = rows.map((r, i) => [f(r, i), r]).sort((a, b) => b[0] - a[0]);
+    if (v[0] && v[0][0] > 0 && (v.length < 2 || v[1][0] < v[0][0])) out.push(`${title}: ${v[0][1].name}`);
+  };
+  pick("Silt Magnet", (r) => r.ties);
+  pick("Penny Pincher", (r) => (players.find((p) => p.seat === r.seat) || {}).air || 0);
+  pick("Big Spender", (r) => r.air);
+  pick("Treasure Hunter", (r) => (r.best ? r.best.gain : 0));
+  return out;
+}
+
+// Rematch series, kept per browser: chains of match codes, capped.
+const series = {
+  load() { try { return JSON.parse(store.get("tg:series")) || { of: {}, ch: {} }; } catch { return { of: {}, ch: {} }; } },
+  save(d) {
+    const ks = Object.keys(d.ch); while (ks.length > 30) delete d.ch[ks.shift()];
+    const ok = Object.keys(d.of); while (ok.length > 90) delete d.of[ok.shift()];
+    store.set("tg:series", JSON.stringify(d));
+  },
+  link(from, to) { const d = this.load(); d.of[to] = d.of[from] || from; this.save(d); },
+  chain(code) { const d = this.load(); return d.of[code] || code; },
+  record(code, e) {
+    const d = this.load(), id = d.of[code] || code, a = d.ch[id] || (d.ch[id] = []);
+    if (!a.some((x) => x.c === code)) { a.push({ c: code, ...e }); if (a.length > 20) a.shift(); this.save(d); }
+    return a;
+  },
+};
+
 function match(code) {
   const ac = new AbortController();
   let st = null, alive = true, ver = 0, offset = 0, token = tokenFor(code), logRounds = [], logTide = 0;
@@ -438,6 +496,8 @@ function match(code) {
   let recon = false, newReveal = false, lastPause = false;
   let emoteWait = 0, emoteTimer = 0;
   const seenEmotes = new Set(), myEmotes = new Set();
+  let revAnim = null, endHold = 0, coachTide = 0, srec = null;
+  const calm = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
   const ann = { tide: 0, lock: "", rv: 0, end: false, fresh: false };
   const root = h("div", {});
   mount(() => app.append(root));
@@ -537,12 +597,23 @@ function match(code) {
     }
   }
 
+  // One-time tips after the very first reveal in this browser.
+  function tips() {
+    if (!store.get("tg:tip:snd")) { store.set("tg:tip:snd", "1"); setTimeout(() => toast("Tip: turn on sound with the 🔊 button"), 600); }
+    if (st.you && st.lastReveal.tide === 1 && !store.get("tg:tip:coach")) { store.set("tg:tip:coach", "1"); coachTide = 1; }
+  }
+
   function announceState() {
     const parts = [], live = ann.fresh;
     if (st.lastReveal && st.lastReveal.tide !== ann.rv) {
       ann.rv = st.lastReveal.tide;
       parts.push(roundLine(st.lastReveal, names()));
-      if (live) revealSound(st.lastReveal);
+      if (live) {
+        revealSound(st.lastReveal);
+        if (!calm()) revAnim = { tide: st.lastReveal.tide, t0: performance.now() };
+        if (st.status === "finished" && !calm()) { endHold = performance.now() + 2500; setTimeout(render, 2550); }
+        tips();
+      }
     }
     ann.fresh = true;
     if (st.status === "playing" && st.tide !== ann.tide) { ann.tide = st.tide; parts.push(`Tide ${st.tide} of ${st.tides} started, ${st.settings.turnSeconds} seconds`); if (EV_NAME[st.event]) parts.push(st.rules.eventText[st.event]); }
@@ -552,7 +623,7 @@ function match(code) {
     if (st.status === "finished" && !ann.end) {
       ann.end = true;
       const win = st.winners || [], me = st.you && st.players.find((p) => p.seat === st.you.seat);
-      if (live && me && win.includes(me.seat)) setTimeout(() => sound.play("fanfare"), 900);
+      if (live && me && win.includes(me.seat)) setTimeout(() => sound.play("fanfare"), 900 + Math.max(0, endHold - performance.now()));
       if (me && win.includes(me.seat)) parts.push(`You ${win.length > 1 ? "shared the win" : "won"} with ${me.pearls} pearls`);
       else parts.push(win.length ? "Winner: " + win.map((s) => names()[s]).join(" and ") : "Match over, no winner");
     }
@@ -654,7 +725,7 @@ function match(code) {
     const gain = st.event === "current" ? st.rules.currentRest : st.rules.restGain;
     const diveOn = !!(m && !m.rest && m.wreck === sel && m.air === airVal);
     const away = st.players[you.seat] && st.players[you.seat].away;
-    return h("section", { class: "card movecard" }, h("h2", {}, "Your move"),
+    return h("section", { class: isPausing() ? "card movecard still" : "card movecard" }, h("h2", {}, "Your move"),
       away && !m ? h("p", { class: "awaynote", role: "status" }, "You missed the last tides, so the table stopped waiting for you. Make any move to rejoin.") : null,
       h("div", { class: "act" },
         h("div", { class: "stepper", role: "group", "aria-label": "Air to spend" }, h("button", { "data-k": "less", "aria-label": "Less air", disabled: broke || airVal <= 1, onclick: () => { airVal--; render(); } }, "−"), h("output", { "aria-live": "polite" }, airVal), h("button", { "data-k": "more", "aria-label": "More air", disabled: broke || airVal >= maxA, onclick: () => { airVal++; render(); } }, "+"), h("span", { class: "sub" }, broke ? "no air left" : `of ${maxA} air`)),
@@ -671,7 +742,7 @@ function match(code) {
 
   function eventsLine() {
     const now = EV_NAME[st.event], next = EV_NAME[st.nextEvent], lastNext = st.tide === st.tides - 1;
-    if (!now && !next && !lastNext) return null;
+    if (!now && !next && !lastNext) return st.tide === st.tides ? h("div", { class: "events" }, h("p", {}, h("b", {}, "Final tide:"), " pearls count double")) : null;
     const txt = (e) => st.rules.eventText[e].replace(/^[^:]*:\s*/, "");
     return h("div", { class: "events" },
       now ? h("p", {}, h("span", { class: "event" }, now), " ", txt(st.event).replace(/^./, (c) => c.toUpperCase())) : null,
@@ -685,15 +756,21 @@ function match(code) {
     out.push(h("section", { class: "card" }, h("div", { class: "hud" }, h("div", {}, finished ? h("b", {}, "Match over") : h("b", {}, `Tide ${curTide()} / ${st.tides}`), " ", !finished && st.tide === st.tides ? h("span", { class: "final" }, "Final tide: pearls count double") : null, " ", h("span", { class: "muted" }, "Code " + code)), h("div", { class: "row", style: "gap:8px" }, finished ? null : h("div", { id: "tleft", class: "muted" }, ""), helpBtn())), finished ? null : eventsLine(), finished ? null : h("div", { class: "timer", role: "presentation" }, h("i"))));
     if (finished) {
       const wn = (st.winners || []).map((s) => st.players[s].name), hl = logRounds.length ? highlight(logRounds, st.players) : null;
-      out.push(h("section", { class: "card center" }, h("h1", {}, wn.length ? (wn.length > 1 ? "Shared victory: " : "Winner: ") + wn.join(" & ") : "No winner"), hl ? h("p", { class: "hlline" }, hl) : null, standings(st, logRounds),
+      const holding = performance.now() < endHold, wl = holding ? [] : endWhy(), ser = holding ? null : seriesInfo();
+      if (!holding) out.push(h("section", { class: "card center" }, h("h1", {}, wn.length ? (wn.length > 1 ? "Shared victory: " : "Winner: ") + wn.join(" & ") : "No winner"), hl ? h("p", { class: "hlline" }, hl) : null, wl.length ? h("ul", { class: "whylist" }, wl.map((t) => h("li", {}, t))) : null, ser && ser.text ? h("p", { class: "series" }, ser.text) : null, standings(st, logRounds),
         h("div", { class: "row", style: "justify-content:center;margin-top:14px" },
-          st.you ? h("button", { class: "primary", onclick: playAgain }, !st.rematch ? "Rematch" : tokenFor(st.rematch) ? "Back to rematch" : "Join rematch") : null, h("a", { class: "btn", href: "/replay/" + code }, "Watch replay"), h("button", { class: "btn", "data-k": "copy", onclick: copyLink }, copied ? "Copied!" : "Copy replay link"), h("a", { class: "btn", href: "/" }, "Home")),
+          st.you ? h("button", { class: "primary", onclick: playAgain, "aria-label": ser && ser.lost && !st.rematch ? "Rematch (revenge)" : null }, !st.rematch ? (ser && ser.lost ? "Revenge" : "Rematch") : tokenFor(st.rematch) ? "Back to rematch" : "Join rematch") : null, h("a", { class: "btn", href: "/replay/" + code }, "Watch replay"), h("button", { class: "btn", "data-k": "copy", onclick: copyLink }, copied ? "Copied!" : "Copy replay link"), h("a", { class: "btn", href: "/" }, "Home")),
         st.you && st.rematch && !tokenFor(st.rematch) ? h("p", { class: "muted", role: "status" }, "Your table wants a rematch, same seats and settings.") : null,
         showLink ? h("input", { class: "rlink", readonly: true, value: replayUrl(), "aria-label": "Replay link", onfocus: (e) => e.target.select() }) : null));
     }
     const pausing = !finished && isPausing();
     let rev = null;
-    if (st.lastReveal) { const fr = animR !== st.lastReveal.tide; if (fr && animR !== -1) newReveal = true; animR = st.lastReveal.tide; rev = h("section", { class: fr ? "card rv fresh" : "card rv" }, revealPanel(st.lastReveal, names(), undefined, { me: st.you ? st.you.seat : null })); }
+    if (st.lastReveal) {
+      const fr = animR !== st.lastReveal.tide; if (fr && animR !== -1) newReveal = true; animR = st.lastReveal.tide;
+      const el = revAnim && revAnim.tide === st.lastReveal.tide ? (performance.now() - revAnim.t0) / 1000 : 9, anim = el < 2.3 ? el : undefined;
+      rev = h("section", { class: fr && anim == null ? "card rv fresh" : "card rv" }, revealPanel(st.lastReveal, names(), undefined, { me: st.you ? st.you.seat : null, anim }),
+        coachTide === st.lastReveal.tide ? h("p", { class: "coach", role: "note" }, "Spent air is gone whether you win or lose. Resting earns air back.") : null);
+    }
     out.push(playersPanel(st.players, { me: st.you && st.you.seat, winners: finished ? st.winners : [], hideStatus: finished, pausing }));
     if (rev && (pausing || finished)) out.push(rev);
     if (!finished) {
@@ -728,7 +805,7 @@ function match(code) {
   async function playAgain() {
     try {
       const r = await api(`/matches/${code}/rematch`, { body: {}, token });
-      store.set("tg:t:" + r.code, r.token);
+      store.set("tg:t:" + r.code, r.token); series.link(code, r.code);
       go("/m/" + r.code);
     } catch (e) {
       // Only start a fresh table when this one can't be used (seat lost or match gone); otherwise say why, so two players don't split up.
@@ -738,6 +815,28 @@ function match(code) {
         await createMatch({ name: st.you.name || myName(), seats: st.settings.seats, bots, turnSeconds: st.settings.turnSeconds, botLevel: st.settings.botLevel });
       } catch (e) { toast(e.message); }
     }
+  }
+
+  // Extra "why" lines for the end card.
+  function endWhy() {
+    const out = [], me = st.you && st.players.find((p) => p.seat === st.you.seat);
+    if (me && me.air > 0) out.push(`You left ${me.air} air unspent`);
+    const tp = logRounds.length ? turningPoint(logRounds, st.winners || []) : null;
+    if (tp) out.push(`Turning point: tide ${tp}, ${st.players[st.winners[0]].name} took the lead for good`);
+    if (logRounds.length) out.push(...titles(logRounds, st.players));
+    return out;
+  }
+
+  // Series for this rematch chain; also notes the chain link and the result (once per match).
+  function seriesInfo() {
+    if (!st.you || !(st.winners || []).length && !logRounds.length) return null;
+    const me = st.you.seat, win = st.winners || [], won = win.includes(me), two = st.players.length === 2;
+    if (srec !== code + st.rematch) { srec = code + st.rematch; series.record(code, { w: won ? 1 : 0, x: !won && win.length ? 1 : 0 }); if (st.rematch) series.link(code, st.rematch); }
+    const a = series.load().ch[series.chain(code)] || [], cur = a.find((x) => x.c === code), lost = !!cur && !cur.w && !!cur.x;
+    if (a.length < 2) return { lost, text: "" , none: true };
+    let streak = 0; for (let i = a.length - 1; i >= 0 && a[i].w; i--) streak++;
+    const w = a.reduce((n, x) => n + x.w, 0), x = a.reduce((n, y) => n + y.x, 0), opp = two ? st.players.find((p) => p.seat !== me).name : null;
+    return { lost, text: (two ? `Series: You ${w} – ${x} ${opp}` : `Your wins this series: ${w}`) + (streak >= 2 ? ` · Win streak: ${streak}` : "") };
   }
 
   function render() {

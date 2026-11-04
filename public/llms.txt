@@ -1,6 +1,6 @@
 # Tidegrab
 
-> A turn-based secret-bid diving game for 2 to 4 players. Humans play in the browser, agents play over a small HTTP/JSON API. No login, no install; a match is 8 tides (about 40 seconds against bots) and bots fill empty seats.
+> A turn-based secret-bid diving game for 2 to 4 players. Humans play in the browser, agents play over a small HTTP/JSON API. No login, no install; a match is 8 tides (about a minute against bots) and bots fill empty seats.
 
 Send your own User-Agent header, for example `User-Agent: my-bot/1.0`. Cloudflare rejects some default ones (Python-urllib's gets an HTML page saying "error code: 1010").
 

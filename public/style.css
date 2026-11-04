@@ -255,5 +255,29 @@ h2 .mine { margin: 0 0 0 10px; font-size: 0.75rem; vertical-align: middle; color
 @media (max-width: 720px) {
   .movecard { position: sticky; bottom: 0; z-index: 5; padding-top: 10px; padding-bottom: 10px; box-shadow: 0 -10px 24px rgba(0, 0, 0, 0.45); }
   .movecard h2 { font-size: 1rem; margin-bottom: 6px; }
+  .movecard.still { position: static; box-shadow: none; }
 }
 @media (hover: none) { .movecard .keys { display: none; } }
+
+/* live staggered reveal: rows appear smallest bid first; --d is set per element (negative = resume after a re-render) */
+.stag .rw .dv, .stag .rw .verdict, .stag .rw .why { animation: dvin .3s ease both; animation-delay: var(--d, 0s); }
+.stag .rw.won .dv.top { animation: dvin .3s ease both, topflash 1s ease both; animation-delay: var(--d, 0s), calc(var(--d, 0s) + .1s); }
+.stag .rw .plus { animation: plusup 1.2s ease-out both; animation-delay: var(--d, 0s); }
+.stag .rw.won .verdict { animation: dvin .3s ease both, winflash 1s ease both; animation-delay: var(--d, 0s), var(--d, 0s); }
+.stag .rw.silt { animation: shake .5s ease both; animation-delay: var(--d, 0s); }
+.stag .rw.silt { background: rgba(220, 80, 80, 0.08); }
+.callout { margin-top: 6px; font-weight: 700; font-size: .85rem; color: var(--gold, #f2c14e); animation: dvin .3s ease both; animation-delay: var(--d, 0s); }
+.callout.silt { color: var(--bad, #ff8080); border: 1px dashed var(--bad, #ff8080); border-radius: 6px; padding: 2px 6px; display: inline-block; }
+@keyframes dvin { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes topflash { 0%, 100% { filter: none; } 40% { filter: brightness(1.6) drop-shadow(0 0 6px #f2c14e); } }
+@keyframes winflash { 0%, 100% { color: inherit; } 40% { color: #f2c14e; text-shadow: 0 0 8px #f2c14e; } }
+.coach { margin: 10px 0 0; font-size: .9rem; color: var(--muted); }
+.whylist { list-style: none; padding: 0; margin: 6px 0 10px; font-size: .92rem; color: var(--muted); }
+.series { font-weight: 700; margin: 4px 0 8px; }
+@media (max-width: 600px) {
+  .players { grid-template-columns: 1fr !important; gap: 4px; }
+  .pl { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; padding: 6px 10px; }
+  .pl .stat { margin-top: 0; gap: 8px; }
+  .pl .form, .pl .sub { margin: 0; font-size: .75rem; }
+}
+@media (prefers-reduced-motion: reduce) { .stag .rw *, .callout, .stag .rw { animation: none !important; opacity: 1 !important; } }

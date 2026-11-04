@@ -56,3 +56,20 @@ test("rematch keeps the table together", async () => {
   assert.deepEqual(s.players.map((p) => p.name).sort(), ["Ann", "Ben", s.players.find((p) => p.kind === "bot").name].sort());
   assert.equal((await call(`/api/matches/${a.code}/rematch:set`, { code: "ZZZZZ" }, a.token)).status, 404);
 });
+
+test("a rematch against bots brings back the same bots", async () => {
+  const m = (await call("/api/matches", { name: "Solo", seats: 3, bots: 2, turnSeconds: 5, botLevel: "easy" })).json;
+  let st;
+  for (let i = 0; i < 200; i++) {
+    st = (await call(`/api/matches/${m.code}`, undefined, m.token)).json;
+    if (st.status === "finished") break;
+    if (st.you && st.you.legal && !st.you.move) await call(`/api/matches/${m.code}/move`, { rest: true }, m.token);
+    await new Promise((r) => setTimeout(r, 15));
+  }
+  assert.equal(st.status, "finished", JSON.stringify(st).slice(0, 200));
+  const before = st.players.filter((p) => p.kind === "bot").map((p) => [p.name, p.level]);
+  const r = (await call(`/api/matches/${m.code}/rematch`, {}, m.token)).json;
+  const next = (await call(`/api/matches/${r.code}`, undefined, r.token)).json;
+  const now = next.players.filter((p) => p.kind === "bot").map((p) => [p.name, p.level]);
+  assert.deepEqual(now, before);
+});

@@ -155,6 +155,10 @@ export class MatchDO {
   async alarm() {
     await this.ready;
     const status = this.room?.d.status;
+    // A finished match still sends the bots' last reactions; it is deleted a day after it ended.
+    if (status === "finished" && this.room.reactions.length) return void this.room.onWake();
+    const keepUntil = status === "finished" ? (this.room.d.finishedAt || 0) + 86400000 : 0;
+    if (Date.now() < keepUntil - 60000) return void (await this.ctx.storage.setAlarm(keepUntil));
     if (!this.room || status === "finished" || status === "expired") {
       this.room = null;
       await this.ctx.storage.deleteAll();
