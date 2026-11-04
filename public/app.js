@@ -434,7 +434,7 @@ function standings(st, rounds) {
 function match(code) {
   const ac = new AbortController();
   let st = null, alive = true, ver = 0, offset = 0, token = tokenFor(code), logRounds = [], logTide = 0;
-  let sel = null, airVal = 2, selTide = 0, busy = false, errMsg = "", animW = "", animR = -1;
+  let sel = null, airVal = 2, selTide = 0, busy = false, myMove = null, errMsg = "", animW = "", animR = -1;
   let recon = false, newReveal = false, lastPause = false;
   let emoteWait = 0, emoteTimer = 0;
   const seenEmotes = new Set(), myEmotes = new Set();
@@ -453,7 +453,10 @@ function match(code) {
   async function act(path, body) {
     if (busy) return;
     busy = true; errMsg = "";
-    try { await api(`/matches/${code}/${path}`, { token, body: body || {} }); } catch (e) { errMsg = e.message; toast(e.message); }
+    try {
+      const r = await api(`/matches/${code}/${path}`, { token, body: body || {} });
+      if (path === "move" && r && r.move) myMove = { tide: r.tide, key: JSON.stringify(r.move), ver: r.version };
+    } catch (e) { errMsg = e.message; toast(e.message); }
     busy = false;
     render();
   }
@@ -499,6 +502,12 @@ function match(code) {
         ver = s.version;
         const first = !st;
         st = s;
+        // Same seat open in another tab or device: say so when that one replaces the move sent from here.
+        const sent = s.you && s.you.move ? JSON.stringify(s.you.move) : null;
+        if (myMove && !busy && s.version >= myMove.ver && s.status === "playing" && s.tide === myMove.tide && sent && sent !== myMove.key) {
+          myMove.key = sent;
+          toast("Your move was changed from another tab or device.");
+        }
         if (first && s.you && s.status !== "finished") autoHelp(s.status);
         recon = false;
         if (!s.you && token) { store.del("tg:t:" + code); token = null; }
