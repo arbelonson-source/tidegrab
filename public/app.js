@@ -126,6 +126,8 @@ function helpDialog() {
       step(0, "Pick a wreck and spend air", "Everyone chooses in secret: one wreck and how much air to put in. Or rest to breathe and get +2 air."),
       step(1, "Biggest spender wins it", "The biggest single spender takes the wreck's pearls plus its air pocket. A tie silts it up: nobody gets it and it grows by a pearl."),
       step(2, "Air is spent for good", "Spent air does not come back, you only get +1 each tide (max 10). The last tide pays double. Most pearls after 8 tides wins, spare air breaks ties.")),
+    h("h3", {}, "Tide events"),
+    h("p", {}, "Four of the first seven tides bring an event everyone can see, announced one tide ahead: strong current (resting gives +3 air), rich seam (the new wreck has 3 extra pearls), air pocket bloom (every wreck holds an air pocket) or slack water (no air comes back that tide)."),
     h("h3", {}, "Keyboard"),
     h("dl", { class: "hkeys" },
       h("dt", {}, ...k("1", "2", "3", "4")), h("dd", {}, "pick a wreck"),
@@ -283,20 +285,89 @@ function why(w) {
   return a.length > 1 ? `${a[0]} air beat ${a[1]}` : "only one diver, uncontested";
 }
 
-function revealPanel(rv, names, title) {
+const sound = (() => {
+  let ctx = null, on = store.get("tg:sound") === "1", lastTick = 0;
+  const btn = () => document.getElementById("snd");
+  const sync = () => { const b = btn(); if (b) { b.setAttribute("aria-pressed", String(on)); b.classList.toggle("is-on", on); } };
+  const ensure = () => {
+    if (!on) return null;
+    try {
+      if (!ctx) { const C = window.AudioContext || window.webkitAudioContext; if (!C) return null; ctx = new C(); }
+      if (ctx.state === "suspended") ctx.resume();
+      return ctx;
+    } catch { return null; }
+  };
+  const tone = (freq, at, dur, vol, type, to) => {
+    const c = ensure();
+    if (!c) return;
+    const t = c.currentTime + at;
+    const o = c.createOscillator(), g = c.createGain();
+    o.type = type || "sine";
+    o.frequency.setValueAtTime(freq, t);
+    if (to) o.frequency.exponentialRampToValueAtTime(to, t + dur);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(vol, t + 0.015);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g).connect(c.destination);
+    o.start(t);
+    o.stop(t + dur + 0.05);
+  };
+  const splash = () => {
+    const c = ensure();
+    if (!c) return;
+    const n = Math.floor(c.sampleRate * 0.5), buf = c.createBuffer(1, n, c.sampleRate), d = buf.getChannelData(0);
+    for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / n, 2);
+    const src = c.createBufferSource(), f = c.createBiquadFilter(), g = c.createGain();
+    src.buffer = buf;
+    f.type = "bandpass";
+    f.frequency.setValueAtTime(1800, c.currentTime);
+    f.frequency.exponentialRampToValueAtTime(500, c.currentTime + 0.45);
+    g.gain.value = 0.12;
+    src.connect(f).connect(g).connect(c.destination);
+    src.start();
+  };
+  const effects = {
+    splash,
+    coin: () => { tone(1319, 0, 0.35, 0.07, "sine"); tone(1976, 0.09, 0.5, 0.06, "sine"); },
+    thud: () => tone(110, 0, 0.35, 0.16, "sine", 45),
+    fanfare: () => [523, 659, 784, 1047].forEach((f, i) => tone(f, i * 0.13, i === 3 ? 0.6 : 0.2, 0.06, "triangle")),
+    tick: () => tone(880, 0, 0.06, 0.04, "sine"),
+  };
+  return {
+    init() {
+      sync();
+      const b = btn();
+      if (!b) return;
+      b.addEventListener("click", () => {
+        on = !on;
+        store.set("tg:sound", on ? "1" : "0");
+        sync();
+        if (on) { ensure(); effects.tick(); }
+        say(on ? "Sound on" : "Sound off");
+      });
+    },
+    play(name) { if (on && effects[name]) effects[name](); },
+    tick(key) { if (on && key !== lastTick) { lastTick = key; effects.tick(); } },
+  };
+})();
+
+const EV_NAME = { current: "Strong current", seam: "Rich seam", bloom: "Air pocket bloom", slack: "Slack water" };
+const evBadge = (e) => EV_NAME[e] ? h("span", { class: "event" }, EV_NAME[e]) : null;
+
+function revealPanel(rv, names, title, opts = {}) {
   const last = rv.last ?? rv.payout > 1;
   const nm = (s) => names[s] || "Seat " + (s + 1);
   const rests = rv.moves.filter((m) => m.rest).map((m) => nm(m.seat) + (m.auto ? " (timed out)" : ""));
   return h("div", {},
-    h("h2", {}, title || `Tide ${rv.tide} reveal`),
+    h("h2", {}, title || `Tide ${rv.tide} reveal`, evBadge(rv.event)),
     h("div", { class: "reveal" }, rv.wrecks.map((w, i) => {
       const verdict = w.winner != null ? `${nm(w.winner)} takes ${w.gain ?? w.pearls} pearl${(w.gain ?? w.pearls) === 1 ? "" : "s"}${(w.gain ?? w.pearls) > w.pearls ? " (doubled)" : ""}${w.air ? " and +" + w.air + " air" : ""}` : w.tie ? (last ? "Silt-out! Tie, nobody takes it" : "Silt-out! Tie, it grows") : last ? "No divers" : "No divers, it grows";
       return h("div", { class: "rw" + (w.winner != null ? " won" : "") + (w.tie ? " silt" : "") + (!w.divers.length ? " empty" : ""), style: `animation-delay:${i * 0.25}s` },
         h("div", { class: "row sb" }, h("b", {}, `Wreck #${w.id}`), h("span", { class: "pearls" }, icon(PEARL), w.pearls)),
         w.winner != null ? h("span", { class: "plus", "aria-hidden": "true" }, "+" + (w.gain ?? w.pearls)) : null,
-        w.divers.length ? w.divers.map((d, j) => h("div", { class: "dv" + (w.winner === d.seat && j === 0 ? " top" : "") }, h("span", {}, nm(d.seat)), h("span", {}, d.air + " air"))) : null,
+        w.divers.length && !opts.hideBids ? w.divers.map((d, j) => h("div", { class: "dv" + (w.winner === d.seat && j === 0 ? " top" : "") }, h("span", {}, nm(d.seat)), h("span", {}, d.air + " air"))) : null,
         h("div", { class: "verdict" }, verdict),
-        why(w) ? h("div", { class: "why" }, why(w)) : null);
+        why(w) && !opts.hideBids ? h("div", { class: "why" }, why(w)) : null);
     })),
     rests.length ? h("div", { class: "rests" }, "Rested: " + rests.join(", ")) : null);
 }
@@ -308,7 +379,7 @@ function roundLine(r, names) {
   const parts = r.wrecks.filter((w) => w.divers.length).map((w) => w.winner != null ? `${nm(w.winner)} took #${w.id} (${w.gain ?? w.pearls})` : `#${w.id} silted out`);
   const rested = r.moves.filter((m) => m.rest).length;
   if (rested) parts.push(rested + " rested");
-  return `Tide ${r.tide}: ` + (parts.join(" · ") || "quiet tide");
+  return `Tide ${r.tide}${EV_NAME[r.event] ? ` (${EV_NAME[r.event]})` : ""}: ` + (parts.join(" · ") || "quiet tide");
 }
 
 function standings(st, rounds) {
@@ -328,7 +399,7 @@ function match(code) {
   let st = null, alive = true, ver = 0, offset = 0, token = tokenFor(code), logRounds = [], logTide = 0;
   let sel = null, airVal = 2, selTide = 0, busy = false, errMsg = "", animW = "", animR = -1;
   let recon = false, newReveal = false, lastPause = false;
-  const ann = { tide: 0, lock: "", rv: 0, end: false };
+  const ann = { tide: 0, lock: "", rv: 0, end: false, fresh: false };
   const root = h("div", {});
   mount(() => app.append(root));
   const tick = setInterval(updateTimer, 250);
@@ -383,19 +454,34 @@ function match(code) {
   }
 
   function announceState() {
-    const parts = [];
-    if (st.lastReveal && st.lastReveal.tide !== ann.rv) { ann.rv = st.lastReveal.tide; parts.push(roundLine(st.lastReveal, names())); }
-    if (st.status === "playing" && st.tide !== ann.tide) { ann.tide = st.tide; parts.push(`Tide ${st.tide} of ${st.tides} started, ${st.settings.turnSeconds} seconds`); }
+    const parts = [], live = ann.fresh;
+    if (st.lastReveal && st.lastReveal.tide !== ann.rv) {
+      ann.rv = st.lastReveal.tide;
+      parts.push(roundLine(st.lastReveal, names()));
+      if (live) revealSound(st.lastReveal);
+    }
+    ann.fresh = true;
+    if (st.status === "playing" && st.tide !== ann.tide) { ann.tide = st.tide; parts.push(`Tide ${st.tide} of ${st.tides} started, ${st.settings.turnSeconds} seconds`); if (EV_NAME[st.event]) parts.push(st.rules.eventText[st.event]); }
     const m = st.you && st.you.move;
     const lk = m ? st.tide + ":" + (m.rest ? "r" : m.wreck + "/" + m.air) : "";
     if (lk !== ann.lock) { ann.lock = lk; if (m) parts.push(m.rest ? "Locked in: rest" : `Locked in: wreck ${m.wreck} with ${m.air} air`); }
     if (st.status === "finished" && !ann.end) {
       ann.end = true;
       const win = st.winners || [], me = st.you && st.players.find((p) => p.seat === st.you.seat);
+      if (live && me && win.includes(me.seat)) setTimeout(() => sound.play("fanfare"), 900);
       if (me && win.includes(me.seat)) parts.push(`You ${win.length > 1 ? "shared the win" : "won"} with ${me.pearls} pearls`);
       else parts.push(win.length ? "Winner: " + win.map((s) => names()[s]).join(" and ") : "Match over, no winner");
     }
     if (parts.length) say(parts.join(". "));
+  }
+
+  function revealSound(rv) {
+    const mine = st.you && st.you.seat;
+    const ws = rv.wrecks || [];
+    const dived = ws.filter((w) => w.divers.some((d) => d.seat === mine));
+    sound.play("splash");
+    if (ws.some((w) => w.winner === mine && mine != null)) setTimeout(() => sound.play("coin"), 450);
+    else if (dived.some((w) => w.tie)) setTimeout(() => sound.play("thud"), 450);
   }
 
   function onKey(e) {
@@ -432,13 +518,20 @@ function match(code) {
     const lab = root.querySelector("#tleft");
     const secs = Math.ceil(left / 1000);
     if (lab) lab.classList.toggle("low", !pausing && left <= 5000);
+    if (!pausing && left > 0 && left <= 5000 && st.you && st.you.legal && !st.you.move) sound.tick(st.tide * 10 + secs);
     if (lab) lab.textContent = pausing ? "Resolving…" : `${secs} second${secs === 1 ? "" : "s"} left`;
   }
 
   function lobbyView() {
     const me = st.you;
     const url = location.origin + "/m/" + code;
-    const copy = async () => { try { await navigator.clipboard.writeText(url); toast("Link copied"); } catch { toast(url); } };
+    const linkIn = h("input", { class: "invite", readonly: true, value: url, "aria-label": "Invite link" });
+    const flash = (msg) => { const el = root.querySelector("#copied"); if (!el) return; el.textContent = msg; clearTimeout(flash.t); flash.t = setTimeout(() => { el.textContent = ""; }, 2200); };
+    const copy = async () => {
+      try { await navigator.clipboard.writeText(url); flash("Copied"); }
+      catch { linkIn.focus(); linkIn.select(); try { document.execCommand("copy") ? flash("Copied") : flash("Press Ctrl+C to copy"); } catch { flash("Press Ctrl+C to copy"); } }
+    };
+    const share = async () => { try { await navigator.share({ title: "Tidegrab", text: "Join my Tidegrab match " + code, url }); } catch { /* share dismissed */ } };
     const open = st.seats.some((s) => !s);
     const nameIn = h("input", { maxlength: 20, placeholder: "Your name", value: myName(), "aria-label": "Your name" });
     const join = async () => {
@@ -449,8 +542,10 @@ function match(code) {
       } catch (e) { toast(e.message); }
     };
     return [
-      h("section", { class: "card center" }, h("div", { class: "muted" }, "Match code"), h("div", { class: "codebox", "aria-label": "Match code " + code.split("").join(" ") }, code),
-        h("div", { class: "row", style: "justify-content:center;margin-top:10px" }, h("button", { onclick: copy }, "Copy invite link"))),
+      h("section", { class: "card center" }, h("div", { class: "muted" }, "Match code"), h("div", { class: "codebox", role: "img", "aria-label": "Match code " + code.split("").join(" ") }, code.split("").map((c) => h("span", { "aria-hidden": "true" }, c))),
+        h("div", { class: "invite-row" }, linkIn),
+        h("div", { class: "row", style: "justify-content:center;margin-top:10px" }, h("button", { class: "primary", "data-k": "copyinvite", onclick: copy }, "Copy invite link"), navigator.share ? h("button", { "data-k": "share", onclick: share }, "Share") : null),
+        h("div", { id: "copied", class: "copied", role: "status", "aria-live": "polite" })),
       h("section", { class: "card" }, h("h2", {}, `Seats (${st.seats.filter(Boolean).length}/${st.settings.seats})`),
         h("ul", { class: "list" }, st.seats.map((s, i) => h("li", {}, s ? h("span", {}, s.name, " ", me && me.seat === i ? h("span", { class: "pill you" }, "you") : null, s.kind === "bot" ? h("span", { class: "pill bot" }, "bot") : null, i === st.host ? h("span", { class: "pill" }, "host") : null) : h("span", { class: "muted" }, "Waiting for a diver..."), h("span", { class: "sub" }, "Seat " + (i + 1))))),
         me && me.isHost ? h("div", { class: "row", style: "margin-top:12px" }, h("button", { disabled: !open, onclick: () => act("bots", { count: 1 }) }, "Add bot"), h("button", { class: "primary", onclick: () => act("start") }, open ? "Start (bots fill empty seats)" : "Start")) : null,
@@ -472,16 +567,25 @@ function match(code) {
       h("div", { class: "act" },
         h("div", { class: "stepper", role: "group", "aria-label": "Air to spend" }, h("button", { "data-k": "less", "aria-label": "Less air", disabled: airVal <= 1, onclick: () => { airVal--; render(); } }, "−"), h("output", { "aria-live": "polite" }, airVal), h("button", { "data-k": "more", "aria-label": "More air", disabled: airVal >= maxA, onclick: () => { airVal++; render(); } }, "+"), h("span", { class: "sub" }, `of ${you.legal.maxAir || 0} air`)),
         h("button", { "data-k": "dive", class: "gold", disabled: sel == null || maxA < 1 || busy, onclick: () => act("move", { wreck: sel, air: airVal }) }, sel == null ? "Pick a wreck" : `Dive #${sel} with ${airVal} air`),
-        h("button", { "data-k": "rest", onclick: () => act("move", { rest: true }) }, `Rest (+${st.rules.restGain} air)`)),
+        h("button", { "data-k": "rest", onclick: () => act("move", { rest: true }) }, `Rest (+${st.event === "current" ? st.rules.currentRest : st.rules.restGain} air)`)),
       h("p", { class: "keys sub" }, "Keys: 1-4 wreck · ↑↓ air · Enter dive · R rest"),
       h("p", { class: m ? "locked" : "sub" }, m ? (m.rest ? "Locked in: rest. You can still change your mind." : `Locked in: ${m.air} air at wreck #${m.wreck}. You can still change it.`) : "Choose a wreck, set your Air, then dive. Moves stay secret until the tide resolves."),
       h("div", { class: "err", role: "alert" }, errMsg));
   }
 
+  function eventsLine() {
+    const now = EV_NAME[st.event], next = EV_NAME[st.nextEvent];
+    if (!now && !next) return null;
+    const txt = (e) => st.rules.eventText[e].replace(/^[^:]*:\s*/, "");
+    return h("div", { class: "events" },
+      now ? h("p", {}, h("span", { class: "event" }, now), " ", txt(st.event).replace(/^./, (c) => c.toUpperCase())) : null,
+      next ? h("p", { class: "muted" }, "Next tide: ", h("b", {}, next), ", " + txt(st.nextEvent)) : null);
+  }
+
   function gameView() {
     const finished = st.status === "finished";
     const out = [];
-    out.push(h("section", { class: "card" }, h("div", { class: "hud" }, h("div", {}, finished ? h("b", {}, "Match over") : h("b", {}, `Tide ${curTide()} / ${st.tides}`), " ", !finished && st.tide === st.tides ? h("span", { class: "final" }, "Final tide: pearls count double") : null, " ", h("span", { class: "muted" }, "Code " + code)), h("div", { class: "row", style: "gap:8px" }, finished ? null : h("div", { id: "tleft", class: "muted" }, ""), helpBtn())), finished ? null : h("div", { class: "timer", role: "presentation" }, h("i"))));
+    out.push(h("section", { class: "card" }, h("div", { class: "hud" }, h("div", {}, finished ? h("b", {}, "Match over") : h("b", {}, `Tide ${curTide()} / ${st.tides}`), " ", !finished && st.tide === st.tides ? h("span", { class: "final" }, "Final tide: pearls count double") : null, " ", h("span", { class: "muted" }, "Code " + code)), h("div", { class: "row", style: "gap:8px" }, finished ? null : h("div", { id: "tleft", class: "muted" }, ""), helpBtn())), finished ? null : eventsLine(), finished ? null : h("div", { class: "timer", role: "presentation" }, h("i"))));
     if (finished) {
       const wn = (st.winners || []).map((s) => st.players[s].name), hl = logRounds.length ? highlight(logRounds, st.players) : null;
       out.push(h("section", { class: "card center" }, h("h1", {}, wn.length ? (wn.length > 1 ? "Shared victory: " : "Winner: ") + wn.join(" & ") : "No winner"), hl ? h("p", { class: "hlline" }, hl) : null, standings(st, logRounds),
@@ -565,11 +669,37 @@ async function replay(code) {
   try { log = await api(`/matches/${code}/log`); } catch (e) {
     return mount(() => app.append(h("section", { class: "card center" }, h("h2", {}, "Replay unavailable"), h("p", {}, e.message), h("a", { class: "btn", href: "/" }, "Home"))));
   }
-  let i = 0, timer = null, shown = -1;
+  let i = 0, timer = null, shown = -1, bids = false, built = false;
+  const last = log.rounds.length - 1;
   const root = h("div", {});
   const names = Object.fromEntries(log.names.map((n, s) => [s, n]));
   const stop = () => { clearInterval(timer); timer = null; };
-  function render() {
+  const go = (n) => { i = Math.max(0, Math.min(last, n)); draw(); };
+  const toggle = () => {
+    if (timer) { stop(); draw(); return; }
+    if (i >= last) i = 0;
+    timer = setInterval(() => { if (i < last) { i++; draw(); } else { stop(); draw(); } }, 3500);
+    draw();
+  };
+  const slider = h("input", { type: "range", min: 1, max: Math.max(1, log.rounds.length), step: 1, value: 1, "aria-label": "Tide", oninput: () => { stop(); go(+slider.value - 1); } });
+  const title = h("b", {});
+  const prev = h("button", { onclick: () => { stop(); go(i - 1); } }, "◀ Prev");
+  const play = h("button", { class: "primary", onclick: toggle });
+  const next = h("button", { onclick: () => { stop(); go(i + 1); } }, "Next ▶");
+  const check = h("input", { type: "checkbox", onchange: () => { bids = check.checked; shown = -1; draw(); } });
+  const body = h("div", {});
+  const controls = h("section", { class: "card" },
+    h("div", { class: "hud" }, title, h("div", { class: "row" }, prev, play, next)),
+    h("div", { class: "scrub" }, slider),
+    h("label", { class: "bidcheck" }, check, "Show bids"));
+  const onKey = (e) => {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const t = e.target;
+    if (t && (t === slider || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) && t.type !== "checkbox" || t.isContentEditable)) return;
+    if (e.key === "ArrowLeft") { e.preventDefault(); stop(); go(i - 1); }
+    else if (e.key === "ArrowRight") { e.preventDefault(); stop(); go(i + 1); }
+  };
+  function draw() {
     const r = log.rounds[i] && norm(log.rounds[i]);
     if (!r) { root.replaceChildren(h("section", { class: "card center" }, h("p", {}, "This match has no completed tides yet."), h("a", { class: "btn", href: "/m/" + code }, "Back to match"))); return; }
     const before = r.before || { players: [], wrecks: [] };
@@ -578,21 +708,29 @@ async function replay(code) {
       const after = r.standings.find((p) => p.seat === s) || {};
       return { seat: s, name: n, kind: log.kinds[s], air: after.air ?? b.air ?? 0, pearls: after.pearls ?? 0 };
     });
-    root.replaceChildren(
-      h("section", { class: "card" }, h("div", { class: "hud" }, h("b", {}, `Replay ${code} · tide ${r.tide} / ${log.rounds.length}`), h("div", { class: "row" },
-        h("button", { disabled: i === 0, onclick: () => { stop(); i--; render(); } }, "◀ Prev"),
-        h("button", { class: "primary", onclick: () => { if (timer) { stop(); render(); } else { if (i >= log.rounds.length - 1) i = 0; timer = setInterval(() => { if (i < log.rounds.length - 1) { i++; render(); } else { stop(); render(); } }, 3500); render(); } } }, timer ? "Pause" : "Autoplay"),
-        h("button", { disabled: i >= log.rounds.length - 1, onclick: () => { stop(); i++; render(); } }, "Next ▶")))),
-      playersPanel(players, { hideStatus: true, winners: i === log.rounds.length - 1 ? log.winners || [] : [] }),
-      h("section", { class: shown !== i ? "card fresh" : "card" }, revealPanel(r, names, "Dives and results")),
-      h("p", { class: "center" }, h("a", { class: "btn", href: "/m/" + code }, "Back to match"), " ", h("a", { class: "btn", href: "/" }, "Home")));
+    title.textContent = `Replay ${code} · tide ${r.tide} / ${log.rounds.length}`;
+    slider.value = i + 1;
+    slider.setAttribute("aria-valuetext", `Tide ${r.tide} of ${log.rounds.length}`);
+    prev.disabled = i === 0;
+    next.disabled = i >= last;
+    play.textContent = timer ? "Pause" : "Autoplay";
+    check.checked = bids;
+    if (!built) {
+      built = true;
+      root.replaceChildren(controls, body, h("p", { class: "center" }, h("a", { class: "btn", href: "/m/" + code }, "Back to match"), " ", h("a", { class: "btn", href: "/" }, "Home")));
+    }
+    body.replaceChildren(
+      playersPanel(players, { hideStatus: true, winners: i === last ? log.winners || [] : [] }),
+      h("section", { class: shown !== i ? "card fresh" : "card" }, revealPanel(r, names, "Dives and results", { hideBids: !bids })));
     shown = i;
   }
   mount(() => app.append(root));
-  cleanup = stop;
-  render();
+  document.addEventListener("keydown", onKey);
+  cleanup = () => { stop(); document.removeEventListener("keydown", onKey); };
+  draw();
 }
 
+sound.init();
 bubbles();
 const path = location.pathname;
 let mt;
