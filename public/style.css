@@ -36,7 +36,7 @@ a:hover { color: #8ff3ea; }
 .top { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; max-width: 1000px; margin: 0 auto; }
 .brand { display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 1.3rem; letter-spacing: 0.5px; color: var(--text); text-decoration: none; }
 main { max-width: 1000px; margin: 0 auto; padding: 8px 16px 48px; position: relative; z-index: 1; }
-main:focus { outline: none; }
+main:focus, [data-k="endh"]:focus, [data-k="rvh"]:focus { outline: none; }
 h1 { font-size: 2rem; margin: 8px 0; }
 h2 { font-size: 1.15rem; margin: 0 0 10px; color: var(--teal); }
 .muted { color: var(--muted); }
@@ -199,6 +199,7 @@ kbd { font: 0.8rem/1 ui-monospace, monospace; padding: 3px 6px; border-radius: 6
 @media (max-width: 480px) { .hart { flex-basis: 96px; } .hart svg { width: 96px; height: 51px; } .st2 { font-size: 0.78rem; } .st2 th, .st2 td { padding: 5px 3px; } dialog.help { padding: 14px; } }
 .reactions { padding: 10px 16px; }
 .emotebar { gap: 6px; }
+.emo[aria-disabled="true"] { opacity: .5; cursor: not-allowed; }
 .emo { min-width: 44px; min-height: 44px; padding: 4px 8px; font-size: 1.3rem; line-height: 1; }
 .emotes { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; min-height: 30px; align-items: center; }
 .emote { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--bg2); font-size: .9rem; }
@@ -281,3 +282,6 @@ h2 .mine { margin: 0 0 0 10px; font-size: 0.75rem; vertical-align: middle; color
   .pl .form, .pl .sub { margin: 0; font-size: .75rem; }
 }
 @media (prefers-reduced-motion: reduce) { .stag .rw *, .callout, .stag .rw { animation: none !important; opacity: 1 !important; } }
+@media (prefers-reduced-motion: reduce) {
+  .rw .plus { opacity: 1; animation: none; }
+}

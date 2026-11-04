@@ -312,7 +312,7 @@ function why(w) {
 const sound = (() => {
   let ctx = null, on = store.get("tg:sound") === "1", lastTick = 0;
   const btn = () => document.getElementById("snd");
-  const sync = () => { const b = btn(); if (b) { b.setAttribute("aria-pressed", String(on)); b.setAttribute("aria-label", on ? "Sound on" : "Sound off"); b.title = on ? "Sound is on (click to mute)" : "Sound is off (click to turn on)"; b.classList.toggle("is-on", on); } };
+  const sync = () => { const b = btn(); if (b) { b.setAttribute("aria-pressed", String(on)); b.setAttribute("aria-label", "Sound"); b.title = on ? "Sound is on (click to mute)" : "Sound is off (click to turn on)"; b.classList.toggle("is-on", on); } };
   const ensure = () => {
     if (!on) return null;
     try {
@@ -405,7 +405,7 @@ function revealPanel(rv, names, title, opts = {}) {
         w.winner != null ? h("span", { class: "plus", "aria-hidden": "true", style: dl(n + 1) }, "+" + (w.gain ?? w.pearls)) : null,
         shown ? w.divers.map((d, j) => h("div", { class: "dv" + (w.winner === d.seat && j === 0 ? " top" : ""), style: dl(rank(d)) }, h("span", {}, nm(d.seat)), h("span", {}, d.air + " air"))) : null,
         h("div", { class: "verdict", style: dl(n) }, verdict),
-        call ? h("div", { class: "callout" + (w.tie ? " silt" : ""), "aria-hidden": "true", style: dl(n + 1) }, call) : null,
+        call ? h("div", { class: "callout" + (w.tie ? " silt" : ""), "aria-hidden": w.tie || call.startsWith("Lost") ? "true" : null, style: dl(n + 1) }, call) : null,
         why(w) && !opts.hideBids ? h("div", { class: "why", style: dl(n) }, why(w)) : null,
         lostNote(w, opts.me));
     })),
@@ -496,7 +496,7 @@ function match(code) {
   let recon = false, newReveal = false, lastPause = false;
   let emoteWait = 0, emoteTimer = 0;
   const seenEmotes = new Set(), myEmotes = new Set();
-  let revAnim = null, endHold = 0, coachTide = 0, srec = null;
+  let revAnim = null, endHold = 0, coachTide = 0, srec = null, endFocused = false;
   const calm = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
   const ann = { tide: 0, lock: "", rv: 0, end: false, fresh: false };
   const root = h("div", {});
@@ -544,7 +544,7 @@ function match(code) {
     });
     return h("section", { class: "card reactions", "aria-label": "Reactions" },
       h("div", { class: "row sb" },
-        h("div", { class: "row emotebar", role: "group", "aria-label": "Send a reaction" }, (st.rules.emotes || Object.keys(EMOJI)).map((k) => h("button", { class: "emo", "data-k": "emo-" + k, title: EMOTE_LABEL[k] || k, "aria-label": "React: " + (EMOTE_LABEL[k] || k), disabled: cool, onclick: () => sendEmote(k) }, EMOJI[k] || k))),
+        h("div", { class: "row emotebar", role: "group", "aria-label": "Send a reaction" }, (st.rules.emotes || Object.keys(EMOJI)).map((k) => h("button", { class: "emo", "data-k": "emo-" + k, title: EMOTE_LABEL[k] || k, "aria-label": "React: " + (EMOTE_LABEL[k] || k), "aria-disabled": cool ? "true" : null, onclick: () => sendEmote(k) }, EMOJI[k] || k))),
         h("span", { class: "muted" }, st.watching ? `${st.watching} watching` : "")),
       h("div", { class: "emotes" }, chips.length ? chips : h("span", { class: "muted" }, st.you ? "Reactions from the table show up here." : "You are watching. Reactions are open to everyone.")));
   }
@@ -608,10 +608,11 @@ function match(code) {
     if (st.lastReveal && st.lastReveal.tide !== ann.rv) {
       ann.rv = st.lastReveal.tide;
       parts.push(roundLine(st.lastReveal, names()));
+      for (const w of st.lastReveal.wrecks) { const c = !w.tie && callout(w, false, st.you ? st.you.seat : null); if (c && !c.startsWith("Lost")) parts.push(c.startsWith("You") ? "You won by one air!" : `${names()[w.winner] || "Seat " + (w.winner + 1)} won by one air.`); }
       if (live) {
         revealSound(st.lastReveal);
         if (!calm()) revAnim = { tide: st.lastReveal.tide, t0: performance.now() };
-        if (st.status === "finished" && !calm()) { endHold = performance.now() + 2500; setTimeout(render, 2550); }
+        if (st.status === "finished" && !calm()) { endHold = performance.now() + 2500; setTimeout(() => { if (alive) { render(); if (!endFocused) say("Match over. Rematch and replay options are below."); } }, 2550); }
         tips();
       }
     }
@@ -656,8 +657,8 @@ function match(code) {
       e.preventDefault(); airVal = Math.max(1, airVal - 1); render();
     } else if (e.key === "Enter") {
       e.preventDefault();
-      if (sel == null) toast("Pick a wreck first");
-      else if (maxA < 1) toast("No air to dive with");
+      if (sel == null) { errMsg = "Pick a wreck first"; toast(errMsg); render(); }
+      else if (maxA < 1) { errMsg = "No air to dive with"; toast(errMsg); render(); }
       else act("move", { wreck: sel, air: airVal });
     } else if (e.key === "r" || e.key === "R") act("move", { rest: true });
   }
@@ -757,9 +758,9 @@ function match(code) {
     if (finished) {
       const wn = (st.winners || []).map((s) => st.players[s].name), hl = logRounds.length ? highlight(logRounds, st.players) : null;
       const holding = performance.now() < endHold, wl = holding ? [] : endWhy(), ser = holding ? null : seriesInfo();
-      if (!holding) out.push(h("section", { class: "card center" }, h("h1", {}, wn.length ? (wn.length > 1 ? "Shared victory: " : "Winner: ") + wn.join(" & ") : "No winner"), hl ? h("p", { class: "hlline" }, hl) : null, wl.length ? h("ul", { class: "whylist" }, wl.map((t) => h("li", {}, t))) : null, ser && ser.text ? h("p", { class: "series" }, ser.text) : null, standings(st, logRounds),
+      if (!holding) out.push(h("section", { class: "card center" }, h("h1", { tabindex: "-1", "data-k": "endh" }, wn.length ? (wn.length > 1 ? "Shared victory: " : "Winner: ") + wn.join(" & ") : "No winner"), hl ? h("p", { class: "hlline" }, hl) : null, wl.length ? h("ul", { class: "whylist" }, wl.map((t) => h("li", {}, t))) : null, ser && ser.text ? h("p", { class: "series" }, ser.text) : null, standings(st, logRounds),
         h("div", { class: "row", style: "justify-content:center;margin-top:14px" },
-          st.you ? h("button", { class: "primary", onclick: playAgain, "aria-label": ser && ser.lost && !st.rematch ? "Rematch (revenge)" : null }, !st.rematch ? (ser && ser.lost ? "Revenge" : "Rematch") : tokenFor(st.rematch) ? "Back to rematch" : "Join rematch") : null, h("a", { class: "btn", href: "/replay/" + code }, "Watch replay"), h("button", { class: "btn", "data-k": "copy", onclick: copyLink }, copied ? "Copied!" : "Copy replay link"), h("a", { class: "btn", href: "/" }, "Home")),
+          st.you ? h("button", { class: "primary", "data-k": "again", onclick: playAgain, "aria-label": ser && ser.lost && !st.rematch ? "Revenge (rematch)" : null }, !st.rematch ? (ser && ser.lost ? "Revenge" : "Rematch") : tokenFor(st.rematch) ? "Back to rematch" : "Join rematch") : null, h("a", { class: "btn", href: "/replay/" + code }, "Watch replay"), h("button", { class: "btn", "data-k": "copy", onclick: copyLink }, copied ? "Copied!" : "Copy replay link"), h("a", { class: "btn", href: "/" }, "Home")),
         st.you && st.rematch && !tokenFor(st.rematch) ? h("p", { class: "muted", role: "status" }, "Your table wants a rematch, same seats and settings.") : null,
         showLink ? h("input", { class: "rlink", readonly: true, value: replayUrl(), "aria-label": "Replay link", onfocus: (e) => e.target.select() }) : null));
     }
@@ -789,7 +790,7 @@ function match(code) {
     }
     if (rev && !pausing && !finished) out.push(rev);
     out.push(emotesView());
-    if (logRounds.length) out.push(h("section", { class: "card" }, h("h2", {}, "Match log"), h("ol", { class: "log", reversed: true }, [...logRounds].reverse().map((r) => h("li", {}, roundLine(r, names()))))));
+    if (logRounds.length) out.push(h("section", { class: "card" }, h("h2", { id: "logh" }, "Match log"), h("ol", { class: "log", reversed: true, tabindex: "0", "aria-labelledby": "logh" }, [...logRounds].reverse().map((r) => h("li", {}, roundLine(r, names()))))));
     return out;
   }
 
@@ -844,7 +845,7 @@ function match(code) {
     const note = () => h("p", { class: "recon sub center" }, "Reconnecting…");
     if (!st) { if (recon) root.replaceChildren(note()); return; }
     const ae = document.activeElement;
-    const fk = ae && root.contains(ae) ? ae.dataset.k : null;
+    const inside = !!ae && root.contains(ae), fk = inside ? ae.dataset.k : null;
     lastPause = isPausing();
     root.replaceChildren(...(recon ? [note()] : []), ...(st.status === "lobby" ? lobbyView() : gameView()));
     if (fk) {
@@ -853,6 +854,16 @@ function match(code) {
       if (el && el.disabled && (fk === "less" || fk === "more")) el = find(fk === "less" ? "more" : "less");
       if (el && !el.disabled) el.focus({ preventScroll: true });
     }
+    // Keyboard focus must not fall to the page when the move card or end card swaps in: land on the reveal, then once on the result.
+    const lost = inside && !root.contains(document.activeElement);
+    const endH = root.querySelector('[data-k="endh"]');
+    if (endH && !endFocused && (lost || inside || document.activeElement === document.body)) { endFocused = true; endH.focus({ preventScroll: true }); }
+    else if (lost) {
+      const t = root.querySelector(".rv h2");
+      if (t) { t.tabIndex = -1; t.dataset.k = "rvh"; t.focus({ preventScroll: true }); }
+    }
+    const rvh = root.querySelector(".rv h2");
+    if (rvh && !rvh.dataset.k) { rvh.tabIndex = -1; rvh.dataset.k = "rvh"; }
     if (newReveal) {
       newReveal = false;
       const c = root.querySelector(".rv");
