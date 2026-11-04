@@ -231,7 +231,7 @@ function home() {
     store.set("tg:name", nameIn.value.trim());
     if (!store.get("tg:t:" + code)) {
       try {
-        const r = await api(`/matches/${code}/join`, { body: { name: nameIn.value } });
+        const r = await api(`/matches/${code}/join?viewer=${viewerId()}`, { body: { name: nameIn.value } });
         store.set("tg:t:" + code, r.token);
       } catch (e) {
         if (e.status === 404) throw new Error("No match with code " + code);
@@ -460,10 +460,11 @@ function turningPoint(rounds, winners) {
 
 // Fun titles from match stats: only unique, non-zero leaders.
 function titles(rounds, players) {
-  const rows = matchStats(rounds, players).rows, out = [];
+  const rows = matchStats(rounds, players).rows, out = [], got = new Set();
+  // At most one title each, so nobody is both the Penny Pincher and the Big Spender.
   const pick = (title, f) => {
     const v = rows.map((r, i) => [f(r, i), r]).sort((a, b) => b[0] - a[0]);
-    if (v[0] && v[0][0] > 0 && (v.length < 2 || v[1][0] < v[0][0])) out.push(`${title}: ${v[0][1].name}`);
+    if (v[0] && v[0][0] > 0 && (v.length < 2 || v[1][0] < v[0][0]) && !got.has(v[0][1].seat)) { got.add(v[0][1].seat); out.push(`${title}: ${v[0][1].name}`); }
   };
   pick("Silt Magnet", (r) => r.ties);
   pick("Penny Pincher", (r) => (players.find((p) => p.seat === r.seat) || {}).air || 0);
@@ -587,8 +588,9 @@ function match(code) {
         if (s.status === "expired") return;
         if (s.status === "finished") {
           endAt = endAt || Date.now();
-          const others = s.players.filter((p) => p.kind === "human").length > 1;
-          if (!s.you || s.rematch || !others || Date.now() - endAt > 600000) return;
+          // Keep listening for a while in case the table starts a rematch: players need another human, watchers just one.
+          const humans = s.players.filter((p) => p.kind === "human").length;
+          if (s.rematch || humans < (s.you ? 2 : 1) || Date.now() - endAt > 600000) return;
         }
       } catch (e) {
         if (!alive) return;
@@ -710,7 +712,7 @@ function match(code) {
     const join = async () => {
       try {
         store.set("tg:name", nameIn.value.trim());
-        const r = await api(`/matches/${code}/join`, { body: { name: nameIn.value } });
+        const r = await api(`/matches/${code}/join?viewer=${viewerId()}`, { body: { name: nameIn.value } });
         token = r.token; store.set("tg:t:" + code, token); ver = 0; st = null; if (pollAc) pollAc.abort(); render();
       } catch (e) { toast(e.message); }
     };
@@ -776,6 +778,7 @@ function match(code) {
         h("div", { class: "row", style: "justify-content:center;margin-top:14px" },
           st.you ? h("button", { class: "primary", "data-k": "again", onclick: playAgain, "aria-label": ser && ser.lost && !st.rematch ? "Revenge (rematch)" : null }, !st.rematch ? (ser && ser.lost ? "Revenge" : "Rematch") : tokenFor(st.rematch) ? "Back to rematch" : "Join rematch") : null, h("a", { class: "btn", href: "/replay/" + code }, "Watch replay"), h("button", { class: "btn", "data-k": "copy", onclick: copyLink }, copied ? "Copied!" : "Copy replay link"), h("a", { class: "btn", href: "/" }, "Home")),
         st.you && st.rematch && !tokenFor(st.rematch) ? h("p", { class: "muted", role: "status" }, "Your table wants a rematch, same seats and settings.") : null,
+        !st.you && st.rematch ? h("p", { class: "muted", role: "status" }, "This table started a rematch. ", h("a", { href: "/m/" + st.rematch }, "Watch the rematch")) : null,
         showLink ? h("input", { class: "rlink", readonly: true, value: replayUrl(), "aria-label": "Replay link", onfocus: (e) => e.target.select() }) : null));
     }
     const pausing = !finished && isPausing();

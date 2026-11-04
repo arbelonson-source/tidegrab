@@ -85,3 +85,14 @@ test("watchers are counted by viewer id, seated players are not", async () => {
   assert.equal(bad.status, 400);
   assert.match(bad.json.error, /viewer/);
 });
+
+test("a watcher who takes a seat stops counting as a watcher at once", async () => {
+  const { code, token } = (await call("/api/matches", { name: "Host", seats: 3 })).json;
+  assert.equal((await call(`/api/matches/${code}?viewer=guestABC`)).json.watching, 1);
+  assert.equal((await call(`/api/matches/${code}?viewer=watcher9`)).json.watching, 2);
+  const j = await call(`/api/matches/${code}/join?viewer=guestABC`, { name: "Guest" });
+  assert.equal(j.status, 200);
+  assert.equal((await call(`/api/matches/${code}`, null, token)).json.watching, 1);
+  // A late request still marked as that viewer does not bring the count back.
+  assert.equal((await call(`/api/matches/${code}?viewer=guestABC`)).json.watching, 1);
+});

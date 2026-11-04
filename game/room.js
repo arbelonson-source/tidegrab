@@ -168,6 +168,8 @@ export class MatchRoom {
     this.watcherEmotes = [];
     this.reactions = [];
     this.viewers = new Map();
+    // Viewer ids that took a seat here: they stop counting as watchers, even if an older request of theirs lands late.
+    this.seated = new Set();
   }
 
   static create(code, params, hooks, opts = {}) {
@@ -485,6 +487,7 @@ export class MatchRoom {
   }
 
   seeViewer(id) {
+    if (this.seated.has(id)) return;
     const now = this.hooks.now();
     if (!this.viewers.has(id) && this.viewers.size >= MAX_VIEWERS) this.watching(now);
     if (this.viewers.has(id) || this.viewers.size < MAX_VIEWERS) this.viewers.set(id, now);
@@ -628,6 +631,8 @@ export class MatchRoom {
     if (d.seats.every(Boolean)) throw d.status === "lobby" ? conflict("lobby_full", "the lobby is full") : conflict("match_running", "the match is full and already running, watch it instead");
       this.requireLobby();
       const seat = this.addSeat(cleanName(body.name, "Diver"), "human");
+      const v = query && query.viewer;
+      if (v && /^[A-Za-z0-9_-]{6,32}$/.test(String(v)) && this.seated.size < 16) { this.seated.add(String(v)); this.viewers.delete(String(v)); }
       if (d.seats.every(Boolean)) this.startMatch();
       else this.commit(true);
       return { status: 200, json: { seat, token: d.seats[seat].token, url: `${origin}/m/${d.code}` } };
